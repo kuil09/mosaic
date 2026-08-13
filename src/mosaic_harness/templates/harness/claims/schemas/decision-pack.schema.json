@@ -1,0 +1,281 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosaic.local/schemas/decision-pack.schema.json",
+  "title": "Mosaic Decision Pack",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "case_id",
+    "generated_at",
+    "updated_at",
+    "issue",
+    "scope",
+    "constraints",
+    "claims",
+    "evidence",
+    "counterexamples",
+    "candidate_outcomes",
+    "outcome",
+    "verification_plan",
+    "rollback_plan",
+    "observation_plan",
+    "unresolved_questions",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "case_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "issue": {
+      "type": "object",
+      "required": ["title", "statement", "source", "sha256", "epistemic_status"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "statement": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "epistemic_status": { "enum": ["asserted", "observed", "verified", "refuted"] }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "required": ["repository", "base_commit", "base_revision", "inventory"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "base_commit": { "type": ["string", "null"] },
+        "base_revision": { "type": "string", "minLength": 65 },
+        "inventory": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "constraints": {
+      "type": "array",
+      "minItems": 4,
+      "items": { "$ref": "#/$defs/constraint" }
+    },
+    "claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/claim" }
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidence" }
+    },
+    "counterexamples": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "candidate_outcomes": {
+      "type": "array",
+      "minItems": 9,
+      "items": {
+        "type": "object",
+        "required": ["type", "evidence_requirement"],
+        "properties": {
+          "type": { "$ref": "#/$defs/outcomeType" },
+          "evidence_requirement": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "outcome": { "$ref": "#/$defs/outcome" },
+    "verification_plan": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "rollback_plan": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "object" }
+    },
+    "observation_plan": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "object" }
+    },
+    "unresolved_questions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["projection_of", "event_head"],
+      "properties": {
+        "projection_of": { "type": "string" },
+        "event_head": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "experiments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/experimentRef" }
+    },
+    "admission": { "$ref": "#/$defs/admission" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "constraint": {
+      "type": "object",
+      "required": [
+        "id",
+        "role",
+        "force",
+        "epistemic_status",
+        "mutability",
+        "provenance",
+        "statement",
+        "evidence_condition",
+        "status",
+        "related_hypotheses"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "role": { "enum": ["target", "preservation", "boundary", "resource"] },
+        "force": { "enum": ["hard", "soft"] },
+        "epistemic_status": { "enum": ["given", "observed", "inferred", "provisional"] },
+        "mutability": { "enum": ["fixed", "changeable", "unknown"] },
+        "provenance": { "type": "string" },
+        "statement": { "type": "string", "minLength": 1 },
+        "evidence_condition": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["removed", "relaxed", "displaced", "transformed", "persistent", "unresolved"] },
+        "related_hypotheses": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "claim": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "statement",
+        "status",
+        "source_layer",
+        "confidence",
+        "scope",
+        "evidence_refs",
+        "counterevidence_refs",
+        "falsifier",
+        "predictions",
+        "linked_outcome",
+        "risk",
+        "rollback"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "enum": ["fact_claim", "assumption", "hypothesis", "risk", "observation", "decision", "uncertainty"] },
+        "statement": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["proposed", "survived", "supported", "refuted", "unresolved", "deferred"] },
+        "source_layer": { "enum": ["L1", "L2", "L3", "L4", "L5"] },
+        "confidence": { "enum": ["speculation", "low", "medium", "high", "formally proven"] },
+        "scope": { "type": "object" },
+        "evidence_refs": { "type": "array", "items": { "type": "string" } },
+        "counterevidence_refs": { "type": "array", "items": { "type": "string" } },
+        "falsifier": { "type": "object" },
+        "predictions": { "type": "object" },
+        "linked_outcome": { "$ref": "#/$defs/outcomeType" },
+        "risk": { "type": "object" },
+        "rollback": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "id",
+        "claim_id",
+        "direction",
+        "strength",
+        "summary",
+        "source_type",
+        "source_ref",
+        "artifact_sha256",
+        "observed_at",
+        "valid_for_commit",
+        "valid_for_revision",
+        "freshness"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "claim_id": { "type": "string" },
+        "direction": { "enum": ["supporting", "opposing", "neutral"] },
+        "strength": { "enum": ["weak", "moderate", "strong"] },
+        "summary": { "type": "string", "minLength": 1 },
+        "source_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "artifact_sha256": {
+          "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+        },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "valid_for_commit": { "type": ["string", "null"] },
+        "valid_for_revision": { "type": "string", "minLength": 1 },
+        "freshness": { "enum": ["current", "stale"] }
+      },
+      "additionalProperties": false
+    },
+    "outcomeType": {
+      "enum": [
+        "CODE_CHANGE",
+        "NO_CHANGE",
+        "INSTRUMENT_FIRST",
+        "CONFIGURATION_CHANGE",
+        "DOCUMENTATION_CHANGE",
+        "OPERATIONAL_ACTION",
+        "POLICY_CONFLICT",
+        "INSUFFICIENT_EVIDENCE",
+        "ISSUE_REJECTED"
+      ]
+    },
+    "outcome": {
+      "type": "object",
+      "required": ["type", "status", "source", "rationale", "conditions", "evidence_refs"],
+      "properties": {
+        "type": { "$ref": "#/$defs/outcomeType" },
+        "status": { "enum": ["provisional", "accepted", "rejected", "superseded"] },
+        "source": { "enum": ["harness", "human"] },
+        "rationale": { "type": "string", "minLength": 1 },
+        "conditions": { "type": "array", "items": { "type": "string" } },
+        "evidence_refs": { "type": "array", "items": { "type": "string" } },
+        "approved_by": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "experimentRef": {
+      "type": "object",
+      "required": ["run_id", "kind", "revision", "verdict_ref", "floor_passed", "isolation"],
+      "properties": {
+        "run_id": { "type": "string" },
+        "kind": { "enum": ["code", "zero-change"] },
+        "revision": { "type": "string" },
+        "verdict_ref": { "type": "string" },
+        "floor_passed": { "type": "boolean" },
+        "isolation": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "admission": {
+      "type": "object",
+      "required": ["status", "surviving_run_ids", "dominated_run_ids", "floor_failures", "rule"],
+      "properties": {
+        "status": { "enum": ["ungated", "refused", "eligible", "overridden"] },
+        "surviving_run_ids": { "type": "array", "items": { "type": "string" } },
+        "dominated_run_ids": { "type": "array", "items": { "type": "string" } },
+        "floor_failures": { "type": "array", "items": { "type": "string" } },
+        "rule": { "const": "hard-floor-then-pareto" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

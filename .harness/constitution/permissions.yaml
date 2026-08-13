@@ -1,0 +1,65 @@
+version: "1.0"
+default_mode: normal
+roles:
+  explorer:
+    allow:
+      - repository.read
+      - logs.read
+      - documents.read
+      - claims.propose
+    deny:
+      - application.write
+      - evaluators.hidden.read
+  builder:
+    allow:
+      - repository.read
+      - candidate.write
+      - tests.public.run
+    deny:
+      - constitution.write
+      - evaluators.write
+      - evaluators.hidden.read
+      - historian.raw.rewrite
+  challenger:
+    allow:
+      - repository.read
+      - counterexamples.write
+      - evaluators.mutation.write
+      - evaluators.property.write
+    deny:
+      - candidate.write
+      - constitution.write
+  verifier:
+    allow:
+      - candidate.read
+      - evaluators.run
+      - verdict.write
+    deny:
+      - candidate.write
+      - evaluators.write_during_evaluation
+  historian:
+    allow:
+      - historian.raw.append
+      - historian.projection.write
+      - historian.conflict.write
+    deny:
+      - historian.raw.rewrite
+      - historian.raw.delete
+  observer:
+    allow:
+      - deployment.read
+      - incidents.read
+      - historian.raw.append
+    deny:
+      - development.decision.override
+  amender:
+    modes:
+      - maintenance
+    allow:
+      - constitution.propose
+      - historical_replay.run
+      - hidden_holdout.run
+      - shadow_run.run
+    deny:
+      - constitution.apply_without_ratification
+
