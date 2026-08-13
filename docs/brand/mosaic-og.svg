@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img" aria-label="Mosaic">
+  <rect width="1280" height="640" fill="#17241e"/>
+  <g transform="translate(576 192)">
+    <rect width="128" height="128" rx="28" fill="#17241e" stroke="#24352e" stroke-width="1"/>
+    <path fill="#54605a" d="M18 20 L52 18 L50 58 L20 56 Z"/>
+    <path fill="#2c3631" d="M20 62 L50 64 L52 110 L18 108 Z"/>
+    <path fill="#24467a" d="M76 18 L110 20 L108 56 L78 58 Z"/>
+    <path fill="#163056" d="M78 64 L108 62 L110 108 L76 110 Z"/>
+    <path fill="#a8b6ae" d="M52 18 L76 18 L78 58 L50 58 Z"/>
+    <path fill="#0b110e" d="M52 64 L76 64 L74 104 L54 104 Z"/>
+    <path fill="none" stroke="#d4a84b" stroke-width="3.25" stroke-linecap="butt" d="M51 19 V105"/>
+    <g transform="translate(64 76) rotate(-17)">
+      <rect x="-13" y="-13" width="26" height="26" rx="2.5" fill="#c45c38"/>
+      <path fill="#2f8a70" d="M1 -13 H13 V-1 Z"/>
+    </g>
+  </g>
+</svg>

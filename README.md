@@ -1,7 +1,7 @@
 # Mosaic
 
 <p align="center">
-  <img src="docs/brand/mosaic-hero.jpg" alt="Unfinished mosaic: one tessera not yet set" width="100%">
+  <img src="docs/brand/mosaic-icon.svg" alt="Mosaic mark: a tessera not yet seated" width="160" height="160">
 </p>
 
 <p align="center">
