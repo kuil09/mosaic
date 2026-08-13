@@ -155,6 +155,60 @@ def _anchor_projection(
     )
 
 
+def _observation_item(
+    *,
+    signal: str | None,
+    rollback_trigger: str | None,
+    observation: str | None = None,
+) -> dict[str, Any]:
+    item = {
+        "id": "OP-1",
+        "observation": observation
+        or "Record the expected signal that would reveal the selected intervention is wrong.",
+        "status": "required",
+    }
+    if signal:
+        item["signal"] = signal
+    if rollback_trigger:
+        item["rollback_trigger"] = rollback_trigger
+    return item
+
+
+def set_observation_plan(
+    workspace: Path,
+    case_id: str,
+    *,
+    signal: str,
+    rollback_trigger: str,
+    observation: str | None = None,
+    actor: str = "mosaic",
+) -> dict[str, Any]:
+    if not signal.strip() or not rollback_trigger.strip():
+        raise ValueError("signal and rollback trigger must not be empty")
+    harness_root = _harness_root(workspace)
+    store = CaseStore(harness_root)
+    pack = store.load(case_id)
+    pack["observation_plan"] = [
+        _observation_item(
+            signal=signal.strip(),
+            rollback_trigger=rollback_trigger.strip(),
+            observation=observation.strip() if observation else None,
+        )
+    ]
+    pack["updated_at"] = utc_now()
+    validate_decision_pack(pack)
+    event = EventLedger(harness_root).append(
+        "observation_plan_recorded",
+        case_id,
+        {"signal": signal.strip(), "rollback_trigger": rollback_trigger.strip()},
+        actor=actor,
+    )
+    projection = _anchor_projection(EventLedger(harness_root), pack, case_id, actor)
+    pack["provenance"]["event_head"] = projection["hash"]
+    store.save(pack)
+    return pack
+
+
 def investigate(
     workspace: Path,
     case_id: str,
@@ -163,6 +217,8 @@ def investigate(
     *,
     max_files: int = 500,
     replace: bool = False,
+    signal: str | None = None,
+    rollback_trigger: str | None = None,
 ) -> tuple[dict[str, Any], Path]:
     validate_case_id(case_id)
     _ensure_runtime(workspace)
@@ -225,11 +281,7 @@ def investigate(
             }
         ],
         "observation_plan": [
-            {
-                "id": "OP-1",
-                "observation": "Record the expected signal that would reveal the selected intervention is wrong.",
-                "status": "required",
-            }
+            _observation_item(signal=signal, rollback_trigger=rollback_trigger)
         ],
         "unresolved_questions": [
             "What observation would falsify the issue's causal interpretation?",

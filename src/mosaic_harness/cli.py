@@ -43,6 +43,7 @@ from mosaic_harness.workflow import (
     propose,
     rebuild_case,
     render_pack,
+    set_observation_plan,
     verify_workspace,
 )
 
@@ -75,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     investigate_parser.add_argument("--repo", type=Path, default=Path.cwd())
     investigate_parser.add_argument("--max-files", type=int, default=500)
     investigate_parser.add_argument("--replace", action="store_true")
+    investigate_parser.add_argument("--signal", help="observation signal that would show the intervention is wrong")
+    investigate_parser.add_argument(
+        "--rollback-trigger",
+        help="rollback trigger required before a state-changing disposition",
+    )
 
     evidence_parser = subparsers.add_parser(
         "evidence", help="record immutable evidence and update its linked claim projection"
@@ -126,6 +132,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="accept a state-changing disposition even when floors failed; keep failures visible",
     )
+
+    observation_plan_parser = subparsers.add_parser(
+        "observation-plan",
+        help="record the signal and rollback trigger required before CODE_CHANGE",
+    )
+    observation_plan_parser.add_argument("case_id")
+    observation_plan_parser.add_argument("--signal", required=True)
+    observation_plan_parser.add_argument("--rollback-trigger", required=True)
+    observation_plan_parser.add_argument("--observation")
+    observation_plan_parser.add_argument("--actor", default="mosaic")
 
     show_parser = subparsers.add_parser("show", help="print the current Decision Pack projection")
     show_parser.add_argument("case_id")
@@ -291,8 +307,23 @@ def run(args: argparse.Namespace) -> object:
             args.repo,
             max_files=args.max_files,
             replace=args.replace,
+            signal=args.signal,
+            rollback_trigger=args.rollback_trigger,
         )
         return _summary(pack, path)
+    if args.command == "observation-plan":
+        pack = set_observation_plan(
+            root,
+            args.case_id,
+            signal=args.signal,
+            rollback_trigger=args.rollback_trigger,
+            observation=args.observation,
+            actor=args.actor,
+        )
+        return {
+            **_summary(pack),
+            "observation_plan": pack["observation_plan"],
+        }
     if args.command == "evidence" and args.evidence_command == "add":
         pack, evidence = add_evidence(
             root,

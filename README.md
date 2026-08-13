@@ -160,6 +160,9 @@ mosaic candidate exec ISSUE-123 RUN_ID --role builder -- python3 -c 'print("ok")
 mosaic candidate build ISSUE-123 RUN_ID --script instruction.json
 mosaic candidate verify ISSUE-123 RUN_ID
 mosaic candidate compare ISSUE-123 ZERO_RUN_ID CODE_RUN_ID
+mosaic observation-plan ISSUE-123 \
+  --signal "The public test that encoded the defect now passes." \
+  --rollback-trigger "Dispose the candidate; do not merge."
 mosaic decide ISSUE-123 CODE_CHANGE \
   --actor engineer@example.com \
   --rationale "A surviving candidate passed the public floor."

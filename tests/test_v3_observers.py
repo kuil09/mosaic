@@ -5,10 +5,17 @@ from pathlib import Path
 import tempfile
 
 from mosaic_harness.admission import AdmissionError
+from mosaic_harness.cli import main
 from mosaic_harness.domain import Outcome
 from mosaic_harness.observers import observe
 from mosaic_harness.storage import CaseStore
-from mosaic_harness.workflow import decide, initialize_workspace, investigate, propose
+from mosaic_harness.workflow import (
+    decide,
+    initialize_workspace,
+    investigate,
+    propose,
+    verify_workspace,
+)
 
 
 class MosaicPhaseETest(unittest.TestCase):
@@ -25,6 +32,30 @@ class MosaicPhaseETest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_observation_plan_command_anchors_projection(self) -> None:
+        stdout = __import__("io").StringIO()
+        stderr = __import__("io").StringIO()
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            status = main(
+                [
+                    "--root",
+                    str(self.root),
+                    "observation-plan",
+                    "ISSUE-E",
+                    "--signal",
+                    "restore test passes",
+                    "--rollback-trigger",
+                    "dispose candidate",
+                ]
+            )
+        self.assertEqual(status, 0, stderr.getvalue())
+        pack = CaseStore(self.root / ".harness").load("ISSUE-E")
+        self.assertEqual(pack["observation_plan"][0]["signal"], "restore test passes")
+        self.assertEqual(pack["observation_plan"][0]["rollback_trigger"], "dispose candidate")
+        self.assertTrue(verify_workspace(self.root, "ISSUE-E")["projection_integrity"]["valid"])
 
     def test_code_change_requires_observation_signal(self) -> None:
         with self.assertRaisesRegex(AdmissionError, "observation plan"):

@@ -39,6 +39,29 @@ def _scripts(root: Path) -> list[Path]:
     return sorted(path for path in root.glob("*.py") if path.is_file())
 
 
+def select_mutation_targets(workspace_root: Path) -> list[Path]:
+    source_root = workspace_root / "src"
+    if not source_root.is_dir():
+        return []
+    files = [
+        path
+        for path in sorted(source_root.rglob("*.py"))
+        if path.is_file() and path.name != "__init__.py"
+    ]
+    preferred = [
+        path
+        for path in files
+        if "return True" in path.read_text(encoding="utf-8", errors="ignore")
+    ]
+    remainder = [path for path in files if path not in preferred]
+    return preferred + remainder
+
+
+def select_mutation_target(workspace_root: Path) -> Path | None:
+    targets = select_mutation_targets(workspace_root)
+    return targets[0] if targets else None
+
+
 def _hash_tree(root: Path, prefix: str) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     if not root.is_dir():
@@ -149,7 +172,7 @@ class MutationVerifier:
     name = "mutation"
 
     def input_records(self, run_root: Path, workspace_root: Path) -> list[dict[str, Any]]:
-        records = [{"builtin": "mutation-kills", "target": "src"}]
+        records = [{"builtin": "mutation-kills", "target": "src/**/*.py"}]
         records.extend(_hash_tree(run_root / "evaluators" / "mutation", "mutation"))
         return records
 
@@ -164,37 +187,52 @@ class MutationVerifier:
         budget: dict[str, int],
         extras: dict[str, Any],
     ) -> dict[str, Any]:
-        sources = sorted((workspace_root / "src").glob("*.py")) if (workspace_root / "src").is_dir() else []
-        if not sources or not (workspace_root / "tests").is_dir():
+        targets = select_mutation_targets(workspace_root)
+        if not targets or not (workspace_root / "tests").is_dir():
             return {"name": self.name, "status": None, "results": [], "configured": False}
-        scratch = run_root / "verifier" / "mutation-scratch"
-        if scratch.exists():
-            shutil.rmtree(scratch)
-        copy_tree_if_present(workspace_root, scratch)
-        mutant = next(iter(sorted((scratch / "src").glob("*.py"))), None)
-        if mutant is None:
-            return {"name": self.name, "status": None, "results": [], "configured": False}
-        original = mutant.read_text(encoding="utf-8")
-        if "return True" in original:
-            mutant.write_text(original.replace("return True", "return False", 1), encoding="utf-8")
-        else:
-            mutant.write_text(original + "\nraise RuntimeError('mosaic-mutation')\n", encoding="utf-8")
         env = dict(environment)
-        env["PYTHONPATH"] = str(scratch / "src")
+        env["PYTHONPATH"] = str((run_root / "verifier" / "mutation-scratch") / "src")
         env["TMPDIR"] = str(run_root / "verifier" / "tmp")
-        result = runner(
-            [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
-            cwd=scratch,
-            profile=profile,
-            budget=budget,
-            env=env,
-        )
-        killed = result["exit_code"] != 0
-        shutil.rmtree(scratch, ignore_errors=True)
+        attempts: list[dict[str, Any]] = []
+        killed = False
+        for source in targets:
+            scratch = run_root / "verifier" / "mutation-scratch"
+            if scratch.exists():
+                shutil.rmtree(scratch)
+            copy_tree_if_present(workspace_root, scratch)
+            relative = source.relative_to(workspace_root)
+            mutant = scratch / relative
+            if not mutant.is_file():
+                continue
+            original = mutant.read_text(encoding="utf-8")
+            if "return True" in original:
+                mutant.write_text(original.replace("return True", "return False", 1), encoding="utf-8")
+            else:
+                mutant.write_text(original + "\nraise RuntimeError('mosaic-mutation')\n", encoding="utf-8")
+            env["PYTHONPATH"] = str(scratch / "src")
+            result = runner(
+                [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
+                cwd=scratch,
+                profile=profile,
+                budget=budget,
+                env=env,
+            )
+            this_killed = result["exit_code"] != 0
+            attempts.append(
+                {
+                    "mutant": relative.as_posix(),
+                    "killed": this_killed,
+                    "exit_code": result["exit_code"],
+                }
+            )
+            shutil.rmtree(scratch, ignore_errors=True)
+            if this_killed:
+                killed = True
+                break
         return {
             "name": self.name,
             "status": killed,
-            "results": [{"mutant": mutant.name, "killed": killed, "exit_code": result["exit_code"]}],
+            "results": attempts,
             "configured": True,
         }
 

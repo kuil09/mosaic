@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from mosaic_harness.candidate import create_candidate, run_role, show_run, verify_candidate
+from mosaic_harness.verifiers import select_mutation_target
 from mosaic_harness.workflow import challenge, initialize_workspace, investigate
 
 
@@ -116,6 +117,19 @@ class MosaicPhaseBTest(unittest.TestCase):
         self.assertEqual(zero_verdict["floor_definition"], code_verdict["floor_definition"])
         self.assertTrue(zero_verdict["floor_passed"])
         self.assertTrue(code_verdict["floor_passed"])
+
+    def test_mutation_target_prefers_nested_domain_module(self) -> None:
+        app = self.root / "nested-app"
+        (app / "src" / "spike").mkdir(parents=True)
+        (app / "src" / "spike" / "__init__.py").write_text("", encoding="utf-8")
+        (app / "src" / "spike" / "server.py").write_text("def serve():\n    return 0\n", encoding="utf-8")
+        (app / "src" / "spike" / "store.py").write_text(
+            "def restore_coupon():\n    return True\n", encoding="utf-8"
+        )
+        chosen = select_mutation_target(app)
+        self.assertIsNotNone(chosen)
+        assert chosen is not None
+        self.assertEqual(chosen.name, "store.py")
 
     def test_challenge_emit_evaluators_does_not_write_hidden(self) -> None:
         hidden_before = list((self.root / ".harness" / "evaluators" / "hidden").glob("*"))

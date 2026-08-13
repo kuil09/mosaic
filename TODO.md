@@ -205,8 +205,10 @@ Observed facts:
   own `tests/` as the floor. Hidden/mutation/property/differential were
   unconfigured. Code candidate was not verified in this run.
 - `decide CODE_CHANGE` first refused for a missing observation `signal` and
-  `rollback_trigger` (no CLI to edit those fields). After a temp-pack edit,
-  it refused: `no undominated code candidate survives the floors`.
+  `rollback_trigger`. Use `mosaic observation-plan CASE --signal ...
+  --rollback-trigger ...` (or `investigate --signal ...`) so the pack stays
+  ledger-anchored. After those fields existed, REAL-001 refused: `no
+  undominated code candidate survives the floors`.
 - `decide NO_CHANGE` was accepted (`admission.status: ungated`).
 - `verify` / `rebuild` succeeded (22 events at that point).
 - `--override` accepted `CODE_CHANGE` and recorded the failed run in
