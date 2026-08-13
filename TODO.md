@@ -61,6 +61,10 @@ Floors: public, hidden, mutation (`src/**/*.py`, skipping `__init__.py` and
   failed the defect test; code candidate passed public+mutation; `decide
   CODE_CHANGE` accepted without override; Spike source stayed defective.
 
+Public docs for an open repository: `README.md`, `CONTRIBUTING.md`,
+`SECURITY.md`, `CODE_OF_CONDUCT.md`, `docs/architecture.md`, `docs/using.md`,
+and `docs/brand/`.
+
 ## Next (only if still building Mosaic)
 
 1. Persist public-floor stdout/stderr on the verdict so a failed floor is

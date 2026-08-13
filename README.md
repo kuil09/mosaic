@@ -1,40 +1,37 @@
 # Mosaic
 
-Mosaic is an epistemic software harness. It records what an organization
-believes about software, what remains uncertain, and which interventions are
-admissible. It does not assume every issue needs code, or that a passing test
-proves the issue is resolved.
+<p align="center">
+  <img src="docs/brand/mosaic-hero.jpg" alt="Unfinished mosaic: one tessera not yet set" width="100%">
+</p>
 
-## Product boundary
+<p align="center">
+  <strong>An epistemic harness for software change.</strong><br>
+  Mosaic records what you believe, what you do not know, and which interventions
+  are still admissible.
+</p>
 
-Mosaic admits a state-changing code intervention only when:
+[![License: MIT](https://img.shields.io/badge/license-MIT-1a2b24)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-1a2b24)](pyproject.toml)
 
-- a Builder produced the change in an isolated candidate;
-- a Verifier ran the same public floor against that candidate and against
-  zero-change;
-- hard floors pass (a missing hidden/property suite is not a pass);
-- the observation plan names a `signal` and a `rollback_trigger`;
-- the code candidate is not floor-eliminated and is on the same-kind Pareto
-  frontier.
+Mosaic is not a coding agent. It does not assume every issue needs a patch, or
+that a passing test proves the issue is resolved. A code change is one possible
+intervention. `NO_CHANGE` is a valid final answer.
 
-`NO_CHANGE` and the other non-code dispositions remain valid final outcomes.
-`--override` can accept a refused state-changing disposition but must leave
-failed floors visible.
+The mark is a tile that has not been set. Missing sockets are uncertainty. The
+gold grout is a verification thread, not a score.
 
-Process isolation is implemented and tested only with macOS
-`/usr/bin/sandbox-exec`. Mosaic does not claim Linux or Windows isolation, an
-LLM Builder, or a network trust anchor. `permissions.yaml` is not a security
-control.
+## Status
 
-## Requirements
+Usable as a local CLI on macOS with `/usr/bin/sandbox-exec`. Isolation is not
+claimed on Linux or Windows. There is no LLM Builder and no network ledger
+anchor. `permissions.yaml` names roles; it is not a security control.
 
-- Python 3.11 or newer
-- Git is optional; when present, evidence is scoped to the commit plus a tree
-  fingerprint
-
-No third-party runtime dependencies.
+See [docs/architecture.md](docs/architecture.md) for the control loop and
+[docs/using.md](docs/using.md) for the full command sequence.
 
 ## Install
+
+Python 3.11 or newer. No third-party runtime dependencies. Git is optional.
 
 ```bash
 python3 -m venv .venv
@@ -42,82 +39,63 @@ python3 -m venv .venv
 mosaic --version
 ```
 
-From this source tree:
+From a source checkout:
 
 ```bash
-PYTHONPATH=src python3 -m mosaic_harness
+PYTHONPATH=src python3 -m mosaic_harness --help
 ```
 
-## Workflow
+## How it decides
 
-Keep three trees separate: the Mosaic tool, the application `--repo`, and a
-disposable `--root` for ledger and cases. Do not use the Mosaic source tree as
-`--repo`; its `tests/` become the public floor.
+A state-changing `CODE_CHANGE` is admitted only when all of these hold:
 
-An example application target is the sibling **Spike** kitchen-ticket app
-(`../spike` when both live under the same parent).
+1. A Builder produced the change in an isolated candidate.
+2. A Verifier ran the same public floor on that candidate and on zero-change.
+3. Configured hard floors pass. A missing hidden or property suite is not a pass.
+4. The observation plan names a `signal` and a `rollback_trigger`.
+5. The code candidate is not floor-eliminated and sits on the same-kind Pareto
+   frontier.
+
+`--override` can force a refused state-changing outcome. Failed floors stay
+visible. There is no weighted score.
+
+## Quick start
+
+Keep three trees separate: this tool, the application `--repo`, and a
+disposable `--root` for the ledger. Do not point `--repo` at Mosaic itself.
 
 ```bash
 mosaic --root /tmp/case init
-mosaic --root /tmp/case investigate SPIKE-001 \
-  --issue /path/to/spike/issue.md \
-  --repo /path/to/spike \
-  --signal "test_completed_tickets_leave_the_active_rail passes" \
+mosaic --root /tmp/case investigate CASE-1 \
+  --issue path/to/issue.md \
+  --repo path/to/application \
+  --signal "The test that encodes the defect passes." \
   --rollback-trigger "Dispose the candidate; do not merge."
 
-mosaic --root /tmp/case candidate prepare SPIKE-001 --repo /path/to/spike --kind zero-change
-mosaic --root /tmp/case candidate prepare SPIKE-001 --repo /path/to/spike --kind code
-mosaic --root /tmp/case candidate build SPIKE-001 CODE_RUN --script fix.json
-mosaic --root /tmp/case candidate verify SPIKE-001 ZERO_RUN
-mosaic --root /tmp/case candidate verify SPIKE-001 CODE_RUN
-mosaic --root /tmp/case candidate compare SPIKE-001 ZERO_RUN CODE_RUN
-mosaic --root /tmp/case decide SPIKE-001 CODE_CHANGE \
-  --actor engineer@example.com \
+mosaic --root /tmp/case candidate prepare CASE-1 --repo path/to/application --kind zero-change
+mosaic --root /tmp/case candidate prepare CASE-1 --repo path/to/application --kind code
+mosaic --root /tmp/case candidate build CASE-1 CODE_RUN --script fix.json
+mosaic --root /tmp/case candidate verify CASE-1 ZERO_RUN
+mosaic --root /tmp/case candidate verify CASE-1 CODE_RUN
+mosaic --root /tmp/case candidate compare CASE-1 ZERO_RUN CODE_RUN
+mosaic --root /tmp/case decide CASE-1 CODE_CHANGE \
+  --actor you@example.com \
   --rationale "The code candidate survives the floor that encodes the defect."
-mosaic --root /tmp/case verify SPIKE-001
+mosaic --root /tmp/case verify CASE-1
 ```
 
-If `investigate` omitted the signal, record it later without editing the pack
-file:
+A sibling experiment target, **Spike**, lives next to this repository when you
+clone both. Its public floor is a single failing test about completed tickets
+staying on the active rail.
 
-```bash
-mosaic --root /tmp/case observation-plan SPIKE-001 \
-  --signal "..." --rollback-trigger "..."
-```
+## Commands
 
-Other commands: `evidence add`, `challenge`, `propose`, `show`, `rebuild`,
-`observe`, `tournament run`, `memory invalidate`, `amend` (Maintenance Mode
-only), `ledger export`, `ledger compare`.
-
-## Evidence
-
-Evidence is directional, provenance-bearing, and revision-scoped. A revision
-combines the Git commit when available with a bounded working-tree fingerprint.
-Stale evidence stays in history but does not update the current claim.
-Automatic `propose` stays conservative: a supported hypothesis does not select a
-state-changing disposition while material rivals remain.
-
-## Storage
-
-```text
-.harness/
-├── constitution/       ratified modes and declarative permissions
-├── claims/schemas/     public Decision Pack contract
-├── cases/              mutable projections (gitignored)
-├── evidence/           local evidence artifacts (gitignored)
-├── evaluators/         public, hidden, mutation, and property roots
-├── experiments/        candidate workspaces and verdicts (gitignored)
-├── future/             scenario contracts and tournament projections
-├── historian/events/   append-only hash-chained ledger (gitignored)
-├── observers/          ingest boundaries
-└── adapters/           agent-specific notes
-```
-
-The ledger is the runtime source of truth. `rebuild` restores a Decision Pack
-from the latest verified snapshot. Hash chaining detects tampering; it does not
-stop a process with write access from replacing the file. `ledger export`
-writes a head witness for comparison outside the tree. It is not a timestamp
-authority.
+| Area | Commands |
+|------|----------|
+| Case | `init` `investigate` `evidence add` `challenge` `propose` `show` `decide` `verify` `rebuild` `observation-plan` |
+| Candidate | `candidate prepare` `exec` `build` `verify` `compare` `dispose` `interrupt` `show` |
+| After | `observe` `memory invalidate` `tournament run` `ledger export` `ledger compare` |
+| Constitution | `amend` (Maintenance Mode only) |
 
 ## Development
 
@@ -125,6 +103,9 @@ authority.
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-Admission uses hard floors, then Pareto dominance. Do not add a weighted
-aggregate score. Future scenarios must stay hidden from Builders and use equal
-budgets. See `.harness/future/scenarios/SCHEMA.md`.
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md)
+before sending a change. [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies.
+
+## License
+
+[MIT](LICENSE). Brand stills are in [docs/brand/](docs/brand/).
