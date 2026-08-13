@@ -122,6 +122,7 @@ class MosaicPhaseBTest(unittest.TestCase):
         app = self.root / "nested-app"
         (app / "src" / "spike").mkdir(parents=True)
         (app / "src" / "spike" / "__init__.py").write_text("", encoding="utf-8")
+        (app / "src" / "spike" / "__main__.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
         (app / "src" / "spike" / "server.py").write_text("def serve():\n    return 0\n", encoding="utf-8")
         (app / "src" / "spike" / "store.py").write_text(
             "def restore_coupon():\n    return True\n", encoding="utf-8"
@@ -130,6 +131,11 @@ class MosaicPhaseBTest(unittest.TestCase):
         self.assertIsNotNone(chosen)
         assert chosen is not None
         self.assertEqual(chosen.name, "store.py")
+        from mosaic_harness.verifiers import select_mutation_targets
+
+        names = [path.name for path in select_mutation_targets(app)]
+        self.assertNotIn("__main__.py", names)
+        self.assertNotIn("__init__.py", names)
 
     def test_challenge_emit_evaluators_does_not_write_hidden(self) -> None:
         hidden_before = list((self.root / ".harness" / "evaluators" / "hidden").glob("*"))

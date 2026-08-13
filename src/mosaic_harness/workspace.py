@@ -8,16 +8,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from mosaic_harness.isolation import PROTECTED_RELATIVE_PATHS
 from mosaic_harness.scanner import IGNORED_DIRECTORIES
 from mosaic_harness.util import canonical_json, sha256_bytes, sha256_file
 
-PROTECTED_MATERIALIZATION_PATHS = (
-    ".harness/constitution",
-    ".harness/evaluators/hidden",
-    ".harness/historian",
-    ".harness/experiments",
-    ".harness/future/scenarios",
-)
+PROTECTED_MATERIALIZATION_PATHS = PROTECTED_RELATIVE_PATHS + (".harness/experiments",)
 
 
 SNAPSHOT_IGNORED_DIRECTORIES = IGNORED_DIRECTORIES | {".tmp", ".mosaic"}
@@ -193,11 +188,7 @@ def snapshot_tree(root: Path) -> dict[str, Any]:
 
 def protected_paths_present(workspace_root: Path) -> list[str]:
     present: list[str] = []
-    for relative in (
-        ".harness/constitution",
-        ".harness/evaluators/hidden",
-        ".harness/historian",
-    ):
+    for relative in PROTECTED_RELATIVE_PATHS:
         if (workspace_root / relative).exists():
             present.append(relative)
     return present

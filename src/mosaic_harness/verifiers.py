@@ -43,10 +43,11 @@ def select_mutation_targets(workspace_root: Path) -> list[Path]:
     source_root = workspace_root / "src"
     if not source_root.is_dir():
         return []
+    skip_names = {"__init__.py", "__main__.py"}
     files = [
         path
         for path in sorted(source_root.rglob("*.py"))
-        if path.is_file() and path.name != "__init__.py"
+        if path.is_file() and path.name not in skip_names
     ]
     preferred = [
         path

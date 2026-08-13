@@ -32,7 +32,7 @@ from mosaic_harness.isolation import (
 )
 from mosaic_harness.storage import CaseStore
 from mosaic_harness.util import utc_now, validate_case_id
-from mosaic_harness.verifiers import find_zero_workspace, floor_definition, run_verification_suite
+from mosaic_harness.verifiers import find_zero_workspace, run_verification_suite
 from mosaic_harness.workflow import ensure_runtime, record_experiment
 from mosaic_harness.workspace import (
     copy_tree_if_present,

@@ -1,79 +1,38 @@
 # Mosaic
 
-Mosaic is an epistemic software harness: it manages what a software organization
-knows, does not know, and must verify before accepting an intervention. It does
-not assume that every issue needs code or that passing tests prove the issue is
-resolved.
+Mosaic is an epistemic software harness. It records what an organization
+believes about software, what remains uncertain, and which interventions are
+admissible. It does not assume every issue needs code, or that a passing test
+proves the issue is resolved.
 
-This repository contains the V0 **Decision Pack**. It turns an issue and a bounded
-repository inventory into a claim–evidence graph, records tamper-evident events,
-generates falsification plans, and supports code and non-code dispositions as
-first-class outcomes.
+## Product boundary
 
-## Current product boundary
+Mosaic admits a state-changing code intervention only when:
 
-Implemented in V0:
+- a Builder produced the change in an isolated candidate;
+- a Verifier ran the same public floor against that candidate and against
+  zero-change;
+- hard floors pass (a missing hidden/property suite is not a pass);
+- the observation plan names a `signal` and a `rollback_trigger`;
+- the code candidate is not floor-eliminated and is on the same-kind Pareto
+  frontier.
 
-- issue intake as an asserted claim;
-- target, preservation, boundary, and resource constraints;
-- eight rival causal or interpretive hypotheses;
-- commit-scoped supporting and opposing evidence;
-- conservative, explicit outcome proposals;
-- `CODE_CHANGE`, `NO_CHANGE`, `INSTRUMENT_FIRST`, `CONFIGURATION_CHANGE`,
-  `DOCUMENTATION_CHANGE`, `OPERATIONAL_ACTION`, `POLICY_CONFLICT`,
-  `INSUFFICIENT_EVIDENCE`, and `ISSUE_REJECTED` dispositions;
-- adversarial counterexample and verification-plan generation;
-- hash-chained append-only JSONL events;
-- a public Decision Pack JSON Schema; and
-- constitutional role and mode contracts.
+`NO_CHANGE` and the other non-code dispositions remain valid final outcomes.
+`--override` can accept a refused state-changing disposition but must leave
+failed floors visible.
 
-Implemented in the V1 Builder–Verifier slice:
-
-- versioned run manifests for isolated candidates;
-- bounded candidate workspaces that omit constitution, hidden evaluators, and
-  the raw historian ledger;
-- a local command adapter that enforces Builder and Verifier capabilities with
-  macOS `sandbox-exec`;
-- a zero-change candidate evaluated under the same public floor; and
-- `candidate_created`, `builder_started`, `builder_finished`,
-  `verification_started`, `verdict_recorded`, `run_interrupted`, and
-  `candidate_disposed` historian events.
-
-Implemented in the Phase A control loop:
-
-- a single packaged Decision Pack schema, with drift detection on `verify`;
-- git worktree materialization when `HEAD` exists, otherwise the bounded copy;
-- a scripted Builder that can write only inside the candidate workspace;
-- verdicts rebound into the Decision Pack `experiments` list; and
-- floor-gated `decide` for state-changing outcomes, with an explicit
-  `--override` that keeps failed floors visible.
-
-Later slices now present in this tree:
-
-- independent public, hidden, mutation, property, and differential verifiers;
-- hard-floor then Pareto admission, with no weighted score;
-- equal-budget Future Maintainer Tournament runs that hide scenario text from Builders;
-- post-change `observe` that can stale-date an accepted decision;
-- memory invalidation and Maintenance Mode `amend` (refused in Normal Mode); and
-- `ledger export` / `ledger compare` for an external copy of the chain head.
-
-Not claimed:
-
-- Linux or Windows process isolation;
-- multi-provider agent execution;
-- a timestamp authority or network ledger anchor.
-
-The declarative permission file documents the intended boundary but is not a
-security control. V1 process isolation is implemented and tested only with
-macOS `/usr/bin/sandbox-exec`. Mosaic does not claim isolation on other
-platforms.
+Process isolation is implemented and tested only with macOS
+`/usr/bin/sandbox-exec`. Mosaic does not claim Linux or Windows isolation, an
+LLM Builder, or a network trust anchor. `permissions.yaml` is not a security
+control.
 
 ## Requirements
 
 - Python 3.11 or newer
-- Git is optional; when available, evidence is scoped to the repository commit
+- Git is optional; when present, evidence is scoped to the commit plus a tree
+  fingerprint
 
-The runtime has no third-party Python dependencies.
+No third-party runtime dependencies.
 
 ## Install
 
@@ -83,129 +42,82 @@ python3 -m venv .venv
 mosaic --version
 ```
 
-For source-tree development, replace `mosaic` with:
+From this source tree:
 
 ```bash
 PYTHONPATH=src python3 -m mosaic_harness
 ```
 
-## End-to-end workflow
+## Workflow
 
-Initialize local runtime storage:
+Keep three trees separate: the Mosaic tool, the application `--repo`, and a
+disposable `--root` for ledger and cases. Do not use the Mosaic source tree as
+`--repo`; its `tests/` become the public floor.
 
-```bash
-mosaic init
-```
-
-Create a Decision Pack. The repository scan is bounded, read-only, excludes
-generated and harness directories, and stores hashes rather than file contents.
+An example application target is the sibling **Spike** kitchen-ticket app
+(`../spike` when both live under the same parent).
 
 ```bash
-mosaic investigate ISSUE-123 \
-  --issue examples/issue.md \
-  --repo .
-```
-
-The initial disposition is intentionally `INSUFFICIENT_EVIDENCE`. Generate
-falsification plans:
-
-```bash
-mosaic challenge ISSUE-123
-```
-
-Record evidence against a claim:
-
-```bash
-mosaic evidence add ISSUE-123 \
-  --claim H-OBSERVABILITY-GAP \
-  --direction supporting \
-  --strength strong \
-  --summary "Cancellation and coupon events have no shared correlation identifier." \
-  --source-type log-inspection \
-  --source-ref incident-2026-08-14
-```
-
-Derive a new provisional disposition:
-
-```bash
-mosaic propose ISSUE-123
-```
-
-Inspect and verify the projection and raw ledger:
-
-```bash
-mosaic show ISSUE-123
-mosaic verify ISSUE-123
-mosaic rebuild ISSUE-123
-```
-
-An authorized human can accept any disposition while keeping the evidence and
-remaining uncertainty visible:
-
-```bash
-mosaic decide ISSUE-123 INSTRUMENT_FIRST \
-  --actor engineer@example.com \
-  --rationale "A correlation identifier is required before causal attribution." \
-  --condition "Review telemetry privacy before deployment."
-```
-
-On macOS, create an isolated candidate after a case exists. The Builder process
-can read the copied repository, Decision Pack, and public tests. It cannot read
-hidden evaluators or write constitution and historian paths.
-
-```bash
-mosaic candidate prepare ISSUE-123 --repo . --kind zero-change
-mosaic candidate prepare ISSUE-123 --repo . --kind code
-mosaic candidate exec ISSUE-123 RUN_ID --role builder -- python3 -c 'print("ok")'
-mosaic candidate build ISSUE-123 RUN_ID --script instruction.json
-mosaic candidate verify ISSUE-123 RUN_ID
-mosaic candidate compare ISSUE-123 ZERO_RUN_ID CODE_RUN_ID
-mosaic observation-plan ISSUE-123 \
-  --signal "The public test that encoded the defect now passes." \
+mosaic --root /tmp/case init
+mosaic --root /tmp/case investigate SPIKE-001 \
+  --issue /path/to/spike/issue.md \
+  --repo /path/to/spike \
+  --signal "test_completed_tickets_leave_the_active_rail passes" \
   --rollback-trigger "Dispose the candidate; do not merge."
-mosaic decide ISSUE-123 CODE_CHANGE \
+
+mosaic --root /tmp/case candidate prepare SPIKE-001 --repo /path/to/spike --kind zero-change
+mosaic --root /tmp/case candidate prepare SPIKE-001 --repo /path/to/spike --kind code
+mosaic --root /tmp/case candidate build SPIKE-001 CODE_RUN --script fix.json
+mosaic --root /tmp/case candidate verify SPIKE-001 ZERO_RUN
+mosaic --root /tmp/case candidate verify SPIKE-001 CODE_RUN
+mosaic --root /tmp/case candidate compare SPIKE-001 ZERO_RUN CODE_RUN
+mosaic --root /tmp/case decide SPIKE-001 CODE_CHANGE \
   --actor engineer@example.com \
-  --rationale "A surviving candidate passed the public floor."
-mosaic candidate dispose ISSUE-123 RUN_ID
+  --rationale "The code candidate survives the floor that encodes the defect."
+mosaic --root /tmp/case verify SPIKE-001
 ```
 
-## Evidence semantics
+If `investigate` omitted the signal, record it later without editing the pack
+file:
+
+```bash
+mosaic --root /tmp/case observation-plan SPIKE-001 \
+  --signal "..." --rollback-trigger "..."
+```
+
+Other commands: `evidence add`, `challenge`, `propose`, `show`, `rebuild`,
+`observe`, `tournament run`, `memory invalidate`, `amend` (Maintenance Mode
+only), `ledger export`, `ledger compare`.
+
+## Evidence
 
 Evidence is directional, provenance-bearing, and revision-scoped. A revision
-combines the Git commit when available with a bounded working-tree fingerprint,
-so uncommitted changes do not silently inherit older evidence. Stale evidence
-remains in history but does not update the current claim status. A
-single severe falsification attempt can support or refute a claim at low
-empirical confidence; two or three independent sources raise confidence without
-turning empirical survival into proof.
+combines the Git commit when available with a bounded working-tree fingerprint.
+Stale evidence stays in history but does not update the current claim.
+Automatic `propose` stays conservative: a supported hypothesis does not select a
+state-changing disposition while material rivals remain.
 
-Automatic proposals are deliberately conservative. A supported hypothesis does
-not select a state-changing disposition until its material rivals are refuted.
-An independently supported observability gap selects `INSTRUMENT_FIRST`, and a
-supported policy conflict stops normal intervention planning.
-
-## Storage and trust boundary
+## Storage
 
 ```text
 .harness/
 ├── constitution/       ratified modes and declarative permissions
 ├── claims/schemas/     public Decision Pack contract
-├── cases/              mutable projections (ignored by Git)
-├── evidence/           local evidence artifacts (ignored by Git)
-├── evaluators/         public, hidden, mutation, and property boundaries
-├── future/             scenario and tournament contracts
-├── historian/events/   append-only hash-chained source events
-├── observers/          CI, deployment, and incident boundaries
-└── adapters/           agent-specific routing notes
+├── cases/              mutable projections (gitignored)
+├── evidence/           local evidence artifacts (gitignored)
+├── evaluators/         public, hidden, mutation, and property roots
+├── experiments/        candidate workspaces and verdicts (gitignored)
+├── future/             scenario contracts and tournament projections
+├── historian/events/   append-only hash-chained ledger (gitignored)
+├── observers/          ingest boundaries
+└── adapters/           agent-specific notes
 ```
 
-The event ledger is the runtime source of truth. Each materialization stores a
-hash-verified projection snapshot, so `mosaic rebuild` can restore a missing or
-damaged Decision Pack from the latest valid event. `mosaic verify` detects edits, removals,
-reordering, and broken links in the event chain. Hash chaining detects tampering;
-it does not prevent a process with filesystem write access from replacing the
-entire ledger. External anchoring and restricted writer processes are later
-hardening work.
+The ledger is the runtime source of truth. `rebuild` restores a Decision Pack
+from the latest verified snapshot. Hash chaining detects tampering; it does not
+stop a process with write access from replacing the file. `ledger export`
+writes a head witness for comparison outside the tree. It is not a timestamp
+authority.
 
 ## Development
 
@@ -213,7 +125,6 @@ hardening work.
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-The next implementation boundary is V1 Builder–Verifier isolation. Future
-Maintainer Tournament work must use the equal-budget, hidden-scenario contract
-in `.harness/future/scenarios/SCHEMA.md` and hard-floor/Pareto selection rather
-than a weighted aggregate score.
+Admission uses hard floors, then Pareto dominance. Do not add a weighted
+aggregate score. Future scenarios must stay hidden from Builders and use equal
+budgets. See `.harness/future/scenarios/SCHEMA.md`.

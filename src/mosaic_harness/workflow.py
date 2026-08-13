@@ -197,7 +197,7 @@ def set_observation_plan(
     ]
     pack["updated_at"] = utc_now()
     validate_decision_pack(pack)
-    event = EventLedger(harness_root).append(
+    EventLedger(harness_root).append(
         "observation_plan_recorded",
         case_id,
         {"signal": signal.strip(), "rollback_trigger": rollback_trigger.strip()},
