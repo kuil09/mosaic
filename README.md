@@ -47,6 +47,20 @@ PYTHONPATH=src python3 -m mosaic_harness --help
 
 ## How it decides
 
+```mermaid
+flowchart TD
+  issue["Issue is an asserted claim"] --> pack["Decision Pack starts as INSUFFICIENT_EVIDENCE"]
+  pack --> zero["Zero-change candidate"]
+  pack --> code["Code candidate in isolation"]
+  zero --> floors["Same public floor and configured hard floors"]
+  code --> floors
+  floors --> admit{"Hard floors then Pareto"}
+  admit -->|"code survives and observation plan is set"| change["CODE_CHANGE is eligible"]
+  admit -->|"only zero-change remains, or floors fail"| nochg["NO_CHANGE or refuse"]
+  change --> observe["Later observation can supersede"]
+  nochg --> observe
+```
+
 A state-changing `CODE_CHANGE` is admitted only when all of these hold:
 
 1. A Builder produced the change in an isolated candidate.
