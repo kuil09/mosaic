@@ -1,12 +1,14 @@
 """Process isolation for Builder and Verifier roles.
 
-V1 process isolation is implemented and tested with macOS
-``/usr/bin/sandbox-exec``. Other platforms are not claimed.
+Process isolation is implemented and tested with macOS ``sandbox-exec``.
+Other platforms are not claimed.
 """
 
 from __future__ import annotations
 
 import sys
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -24,11 +26,30 @@ PROTECTED_RELATIVE_PATHS: tuple[str, ...] = (
 
 
 class IsolationUnavailableError(RuntimeError):
-    """Raised when V1 isolation cannot be enforced on this platform."""
+    """Raised when isolation cannot be enforced on this platform."""
 
 
+@lru_cache(maxsize=1)
 def isolation_available() -> bool:
-    return sys.platform == "darwin" and SANDBOX_EXEC.is_file()
+    if sys.platform != "darwin" or not SANDBOX_EXEC.is_file():
+        return False
+    try:
+        probe = subprocess.run(
+            [
+                str(SANDBOX_EXEC),
+                "-p",
+                "(version 1)\n(allow default)\n",
+                "--",
+                "/usr/bin/true",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
 
 
 def describe_isolation() -> dict[str, object]:
@@ -39,9 +60,9 @@ def describe_isolation() -> dict[str, object]:
         "tested_platform": TESTED_PLATFORM,
         "available": available,
         "detail": (
-            "Process isolation is enforced with macOS /usr/bin/sandbox-exec."
+            "Process isolation is enforced with a successfully probed macOS /usr/bin/sandbox-exec."
             if available
-            else "V1 process isolation is implemented and tested only with "
+            else "Process isolation is implemented and tested only with "
             "macOS /usr/bin/sandbox-exec. This platform is not claimed."
         ),
     }

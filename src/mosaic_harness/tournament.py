@@ -8,8 +8,10 @@ from typing import Any, Sequence
 
 from mosaic_harness.admission import rank_candidates
 from mosaic_harness.candidate import verify_candidate
+from mosaic_harness.compat import require_writable_pack
 from mosaic_harness.executor import load_json, manifest_path
 from mosaic_harness.historian import EventLedger
+from mosaic_harness.storage import CaseStore
 from mosaic_harness.util import atomic_write_json, utc_now
 from mosaic_harness.workflow import ensure_runtime
 from mosaic_harness.workspace import scan_for_tokens, workspace_texts
@@ -68,6 +70,7 @@ def run_tournament(
         raise TournamentError("tournament requires at least two runs")
     workspace = workspace.resolve()
     harness_root, _ = ensure_runtime(workspace)
+    require_writable_pack(CaseStore(harness_root).load(case_id))
     scenario = load_scenario(workspace, scenario_id)
     manifests = _manifests(harness_root, run_ids)
     if any(item.get("case_id") != case_id for item in manifests):

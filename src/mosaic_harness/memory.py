@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from mosaic_harness.historian import EventLedger
+from mosaic_harness.compat import require_writable_pack
 from mosaic_harness.storage import CaseStore
 from mosaic_harness.util import atomic_write_json, utc_now
 from mosaic_harness.validation import validate_decision_pack
@@ -32,6 +33,7 @@ def check_conflicts(harness_root: Path) -> None:
 
 
 def acknowledge_conflict(workspace: Path, case_id: str) -> dict[str, Any]:
+    require_writable_pack(CaseStore(_harness_root(workspace)).load(case_id))
     path = conflict_path(_harness_root(workspace), case_id)
     if not path.is_file():
         raise MemoryError(f"no conflict recorded for {case_id}")
@@ -54,6 +56,7 @@ def invalidate_claim(
     harness_root = _harness_root(workspace)
     store = CaseStore(harness_root)
     pack = store.load(case_id)
+    require_writable_pack(pack)
     claim = next((item for item in pack["claims"] if item["id"] == claim_id), None)
     if claim is None:
         raise MemoryError(f"claim not found: {claim_id}")

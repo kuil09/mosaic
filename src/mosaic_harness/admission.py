@@ -6,8 +6,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from mosaic_harness.domain import Outcome
-from mosaic_harness.executor import load_json
-from mosaic_harness.util import sha256_file
+from mosaic_harness.executor import load_json, manifest_path
+from mosaic_harness.scanner import scan_repository
+from mosaic_harness.util import git_commit, sha256_file
+from mosaic_harness.verification_contract import verify_frozen_floor
+from mosaic_harness.workspace import snapshot_tree
 
 
 STATE_CHANGING_OUTCOMES = {
@@ -36,14 +39,22 @@ def change_surface_files(workspace_root: Path, peer: Path | None, kind: str) -> 
         return 0
     if peer is None or not peer.is_dir():
         return 1
-    count = 0
-    for path in workspace_root.rglob("*"):
-        if not path.is_file() or ".tmp" in path.parts or "__pycache__" in path.parts:
-            continue
-        other = peer / path.relative_to(workspace_root)
-        if not other.is_file() or sha256_file(path) != sha256_file(other):
-            count += 1
-    return count
+    def files(root: Path) -> dict[str, Path]:
+        return {
+            path.relative_to(root).as_posix(): path
+            for path in root.rglob("*")
+            if path.is_file() and ".tmp" not in path.parts and "__pycache__" not in path.parts
+        }
+
+    current = files(workspace_root)
+    baseline = files(peer)
+    names = set(current) | set(baseline)
+    return sum(
+        name not in current
+        or name not in baseline
+        or sha256_file(current[name]) != sha256_file(baseline[name])
+        for name in names
+    )
 
 
 def verdict_measures(
@@ -58,7 +69,7 @@ def verdict_measures(
     return {
         "change_surface_files": change_surface_files(workspace_root, peer, kind),
         "reversible": reversible,
-        "budget_seconds_used": float(budget.get("used_seconds") or budget.get("max_seconds") or 0),
+        "budget_seconds_used": float(budget.get("used_seconds") or 0),
         "human_intervention": human_intervention,
     }
 
@@ -143,7 +154,6 @@ def require_admission(
     outcome: Outcome,
     verdicts: list[dict[str, Any]],
     *,
-    override: bool = False,
     pack: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     evaluation = evaluate_admission(verdicts)
@@ -159,9 +169,6 @@ def require_admission(
     ]
     code_on_frontier = [item for item in frontier if item.get("kind") == "code"]
     only_zero = frontier and all(item.get("kind") == "zero-change" for item in frontier)
-    if override:
-        evaluation["status"] = "overridden"
-        return evaluation
     if pack is not None and not observation_plan_ready(pack):
             evaluation["status"] = "refused"
             raise AdmissionError(
@@ -177,6 +184,114 @@ def require_admission(
     evaluation["dominated_run_ids"] = ranking["dominated"]
     evaluation["floor_failures"] = ranking["eliminated_by_floor"]
     return evaluation
+
+
+def require_v2_admission(
+    workspace: Path,
+    pack: dict[str, Any],
+    outcome: Outcome,
+    proposal_id: str,
+) -> dict[str, Any]:
+    """Validate a v2 human decision against its exact harness proposal."""
+
+    proposal = pack.get("latest_proposal") or {}
+    if proposal.get("proposal_id") != proposal_id:
+        raise AdmissionError("decision must reference the latest proposal id")
+    if proposal.get("outcome") != outcome.value:
+        raise AdmissionError("decision outcome must match the latest harness proposal")
+    unsupported = {
+        Outcome.CONFIGURATION_CHANGE,
+        Outcome.DOCUMENTATION_CHANGE,
+        Outcome.OPERATIONAL_ACTION,
+    }
+    if outcome in unsupported:
+        raise AdmissionError(
+            f"{outcome.value} is not admissible until a typed verification adapter exists"
+        )
+    if outcome != Outcome.CODE_CHANGE:
+        return {
+            "status": "eligible",
+            "rule": "proposal-bound-non-state-changing",
+            "proposal_id": proposal_id,
+            "surviving_run_ids": [],
+            "dominated_run_ids": [],
+            "floor_failures": [],
+        }
+    if not observation_plan_ready(pack):
+        raise AdmissionError(
+            "state-changing disposition refused: observation plan needs signal and rollback_trigger"
+        )
+    pair_id = proposal.get("pair_id")
+    code_run_id = proposal.get("code_run_id")
+    if not pair_id or not code_run_id:
+        raise AdmissionError("CODE_CHANGE proposal is not bound to an experiment pair")
+    from mosaic_harness.pair import pair_verdict_path
+    from mosaic_harness.pair import load_pair, pair_path
+    from mosaic_harness.pair_verifier import compare_pair
+
+    harness_root = workspace.resolve() / ".harness"
+    verdict_file = pair_verdict_path(harness_root, pair_id, code_run_id)
+    if not verdict_file.is_file():
+        raise AdmissionError("proposal pair verdict is missing")
+    verdict = load_json(verdict_file)
+    if not verdict.get("eligible"):
+        raise AdmissionError("proposal code attempt did not satisfy the verification contract")
+    if verdict.get("base_revision") != proposal.get("base_revision"):
+        raise AdmissionError("proposal and verdict revisions differ")
+    if verdict.get("code_snapshot") != proposal.get("code_snapshot"):
+        raise AdmissionError("proposal and verdict snapshots differ")
+    if verdict.get("floor_definition_sha256") != proposal.get("floor_definition_sha256"):
+        raise AdmissionError("proposal and verdict floor definitions differ")
+    pair = load_pair(harness_root, pair_id)
+    manifest = load_json(manifest_path(harness_root, code_run_id))
+    current_snapshot = snapshot_tree(Path(manifest["workspace_root"]))["sha256"]
+    if current_snapshot != verdict.get("code_snapshot"):
+        raise AdmissionError("candidate changed after verification")
+    internal_contract = load_json(
+        pair_path(harness_root, pair_id) / "floor" / "internal-contract.json"
+    )
+    floor = verify_frozen_floor(
+        internal_contract,
+        public_root=Path(pair["public_root"]),
+        pair_root=pair_path(harness_root, pair_id),
+    )
+    if (
+        not floor["valid"]
+        or floor["definition_sha256"] != verdict.get("floor_definition_sha256")
+    ):
+        raise AdmissionError("verification floor changed after verification")
+    repository = Path(pack["scope"]["repository"])
+    commit = git_commit(repository)
+    limits = pack["scope"]["inventory"]["limits"]
+    inventory = scan_repository(
+        repository,
+        max_files=int(limits["max_files"]),
+        max_file_bytes=int(limits["max_file_bytes"]),
+    )
+    current_revision = (
+        f"git:{commit}+tree:{inventory['fingerprint_sha256']}"
+        if commit
+        else f"tree:{inventory['fingerprint_sha256']}"
+    )
+    if current_revision != pack["scope"]["base_revision"]:
+        raise AdmissionError("repository revision changed after investigation")
+    comparison = compare_pair(workspace, pack["case_id"], pair_id)
+    if code_run_id not in comparison["frontier_run_ids"]:
+        raise AdmissionError("proposal code attempt is not on the eligible Pareto frontier")
+    return {
+        "status": "eligible",
+        "rule": "target-improvement-then-code-pareto",
+        "proposal_id": proposal_id,
+        "pair_id": pair_id,
+        "surviving_run_ids": comparison["frontier_run_ids"],
+        "dominated_run_ids": sorted(
+            set(comparison["eligible_run_ids"]) - set(comparison["frontier_run_ids"])
+        ),
+        "floor_failures": [],
+        "selected_run_id": code_run_id,
+        "code_snapshot": verdict["code_snapshot"],
+        "floor_definition_sha256": verdict["floor_definition_sha256"],
+    }
 
 
 def experiment_ref(manifest: dict[str, Any], verdict: dict[str, Any]) -> dict[str, Any]:

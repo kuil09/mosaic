@@ -1,4 +1,4 @@
-"""Command-line entrypoint for the Mosaic Decision Pack and V1 isolation slice."""
+"""Command-line entrypoint for Mosaic execution and admission workflows."""
 
 from __future__ import annotations
 
@@ -16,14 +16,20 @@ from mosaic_harness.candidate import (
     IsolationUnavailableError,
     RunStateError,
     build_candidate,
-    compare_candidates,
-    create_candidate,
     dispose_candidate,
     interrupt_run,
     run_role,
     show_run,
-    verify_candidate,
 )
+from mosaic_harness.compat import LegacyReadOnlyError
+from mosaic_harness.pair import (
+    PairNotFoundError,
+    PairStateError,
+    prepare_pair,
+    retry_code,
+    show_pair,
+)
+from mosaic_harness.pair_verifier import compare_pair, verify_pair
 from mosaic_harness.schema import SchemaDriftError
 from mosaic_harness.amendment import AmendmentError, propose_amendment, ratify_amendment, rollback_amendment
 from mosaic_harness.anchor import AnchorError, compare_head, export_head
@@ -45,6 +51,24 @@ from mosaic_harness.workflow import (
     render_pack,
     set_observation_plan,
     verify_workspace,
+)
+from mosaic_harness.verification_contract import VerificationContractError
+from mosaic_harness.work import (
+    WorkContractError,
+    WorkStateError,
+    attach_pair,
+    block_task,
+    complete_task,
+    create_work,
+    finish_work,
+    implementation_complete,
+    next_work,
+    render_resume_markdown,
+    replan_work,
+    resume_packet,
+    start_task,
+    status_work,
+    unblock_task,
 )
 
 
@@ -127,11 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
     decide_parser.add_argument("--rationale", required=True)
     decide_parser.add_argument("--actor", required=True)
     decide_parser.add_argument("--condition", action="append", default=[])
-    decide_parser.add_argument(
-        "--override",
-        action="store_true",
-        help="accept a state-changing disposition even when floors failed; keep failures visible",
-    )
+    decide_parser.add_argument("--proposal", required=True)
 
     observation_plan_parser = subparsers.add_parser(
         "observation-plan",
@@ -164,17 +184,15 @@ def build_parser() -> argparse.ArgumentParser:
         dest="candidate_command", required=True
     )
 
-    prepare_parser = candidate_subparsers.add_parser(
-        "prepare", help="materialize an isolated candidate workspace"
+    prepare_pair_parser = candidate_subparsers.add_parser(
+        "prepare-pair", help="materialize zero-change and code candidates under one frozen floor"
     )
-    prepare_parser.add_argument("case_id")
-    prepare_parser.add_argument("--repo", type=Path, default=Path.cwd())
-    prepare_parser.add_argument(
-        "--kind", choices=("code", "zero-change"), default="code"
-    )
-    prepare_parser.add_argument("--max-seconds", type=int, default=30)
-    prepare_parser.add_argument("--max-output-bytes", type=int, default=65536)
-    prepare_parser.add_argument("--max-files", type=int, default=500)
+    prepare_pair_parser.add_argument("case_id")
+    prepare_pair_parser.add_argument("--repo", type=Path, default=Path.cwd())
+    prepare_pair_parser.add_argument("--verification-contract", type=Path, required=True)
+    prepare_pair_parser.add_argument("--max-seconds", type=int, default=30)
+    prepare_pair_parser.add_argument("--max-output-bytes", type=int, default=65536)
+    prepare_pair_parser.add_argument("--max-files", type=int, default=500)
 
     exec_parser = candidate_subparsers.add_parser(
         "exec",
@@ -195,11 +213,19 @@ def build_parser() -> argparse.ArgumentParser:
     build_parser.add_argument("run_id")
     build_parser.add_argument("--script", type=Path, required=True)
 
-    verify_candidate_parser = candidate_subparsers.add_parser(
-        "verify", help="evaluate a candidate against the public floor"
+    verify_pair_parser = candidate_subparsers.add_parser(
+        "verify-pair", help="verify one code attempt against its paired zero-change control"
     )
-    verify_candidate_parser.add_argument("case_id")
-    verify_candidate_parser.add_argument("run_id")
+    verify_pair_parser.add_argument("case_id")
+    verify_pair_parser.add_argument("pair_id")
+    verify_pair_parser.add_argument("--code-run", required=True)
+
+    retry_parser = candidate_subparsers.add_parser(
+        "retry-code", help="derive a mutable code attempt from a frozen attempt"
+    )
+    retry_parser.add_argument("case_id")
+    retry_parser.add_argument("pair_id")
+    retry_parser.add_argument("--from", dest="from_run_id", required=True)
 
     dispose_parser = candidate_subparsers.add_parser(
         "dispose", help="remove a candidate workspace while keeping the run record"
@@ -220,10 +246,71 @@ def build_parser() -> argparse.ArgumentParser:
     candidate_show_parser.add_argument("run_id")
 
     compare_parser = candidate_subparsers.add_parser(
-        "compare", help="compare two candidates under the same public floor"
+        "compare", help="compare eligible code attempts in one experiment pair"
     )
     compare_parser.add_argument("case_id")
-    compare_parser.add_argument("run_ids", nargs="+")
+    compare_parser.add_argument("pair_id")
+
+    pair_show_parser = candidate_subparsers.add_parser(
+        "show-pair", help="print one experiment pair and its recorded verdicts"
+    )
+    pair_show_parser.add_argument("case_id")
+    pair_show_parser.add_argument("pair_id")
+
+    work_parser = subparsers.add_parser("work", help="manage a durable single-worker execution contract")
+    work_sub = work_parser.add_subparsers(dest="work_command", required=True)
+
+    work_create = work_sub.add_parser("create")
+    work_create.add_argument("case_id")
+    work_create.add_argument("--contract", type=Path, required=True)
+    work_create.add_argument("--actor", required=True)
+
+    work_status = work_sub.add_parser("status")
+    work_status.add_argument("case_id")
+    work_next = work_sub.add_parser("next")
+    work_next.add_argument("case_id")
+
+    work_attach = work_sub.add_parser("attach-pair")
+    work_attach.add_argument("case_id")
+    work_attach.add_argument("pair_id")
+    work_attach.add_argument("--code-run", required=True)
+    work_attach.add_argument("--actor", required=True)
+
+    work_task = work_sub.add_parser("task")
+    work_task_sub = work_task.add_subparsers(dest="work_task_command", required=True)
+    work_task_start = work_task_sub.add_parser("start")
+    work_task_start.add_argument("case_id")
+    work_task_start.add_argument("task_id")
+    work_task_start.add_argument("--actor", required=True)
+    work_task_block = work_task_sub.add_parser("block")
+    work_task_block.add_argument("case_id")
+    work_task_block.add_argument("task_id")
+    work_task_block.add_argument("--reason", required=True)
+    work_task_block.add_argument("--actor", required=True)
+    work_task_unblock = work_task_sub.add_parser("unblock")
+    work_task_unblock.add_argument("case_id")
+    work_task_unblock.add_argument("task_id")
+    work_task_unblock.add_argument("--actor", required=True)
+    work_task_complete = work_task_sub.add_parser("complete")
+    work_task_complete.add_argument("case_id")
+    work_task_complete.add_argument("task_id")
+    work_task_complete.add_argument("--evidence-ref", action="append", required=True)
+    work_task_complete.add_argument("--actor", required=True)
+
+    work_implemented = work_sub.add_parser("implementation-complete")
+    work_implemented.add_argument("case_id")
+    work_implemented.add_argument("--actor", required=True)
+    work_replan = work_sub.add_parser("replan")
+    work_replan.add_argument("case_id")
+    work_replan.add_argument("--contract", type=Path, required=True)
+    work_replan.add_argument("--reason", required=True)
+    work_replan.add_argument("--actor", required=True)
+    work_resume = work_sub.add_parser("resume")
+    work_resume.add_argument("case_id")
+    work_resume.add_argument("--format", choices=("json", "markdown"), default="json")
+    work_finish = work_sub.add_parser("finish")
+    work_finish.add_argument("case_id")
+    work_finish.add_argument("--actor", required=True)
 
     tournament_parser = subparsers.add_parser(
         "tournament", help="run an equal-budget Future Maintainer Tournament"
@@ -361,7 +448,7 @@ def run(args: argparse.Namespace) -> object:
             args.rationale,
             args.actor,
             args.condition,
-            override=args.override,
+            proposal_id=args.proposal,
         )
         return _summary(pack)
     if args.command == "show":
@@ -373,6 +460,8 @@ def run(args: argparse.Namespace) -> object:
         return _summary(pack, path)
     if args.command == "candidate":
         return _run_candidate(root, args)
+    if args.command == "work":
+        return _run_work(root, args)
     if args.command == "tournament":
         if args.tournament_command == "run":
             run_ids = [item.strip() for item in args.runs.split(",") if item.strip()]
@@ -438,14 +527,14 @@ def run(args: argparse.Namespace) -> object:
 
 
 def _run_candidate(root: Path, args: argparse.Namespace) -> object:
-    if args.candidate_command == "prepare":
+    if args.candidate_command == "prepare-pair":
         if args.max_files < 1:
             raise ValueError("--max-files must be at least 1")
-        return create_candidate(
+        return prepare_pair(
             root,
             args.case_id,
             args.repo,
-            kind=args.kind,
+            args.verification_contract,
             budget={
                 "max_seconds": args.max_seconds,
                 "max_output_bytes": args.max_output_bytes,
@@ -473,8 +562,10 @@ def _run_candidate(root: Path, args: argparse.Namespace) -> object:
         )
     if args.candidate_command == "build":
         return build_candidate(root, args.case_id, args.run_id, args.script)
-    if args.candidate_command == "verify":
-        return verify_candidate(root, args.case_id, args.run_id)
+    if args.candidate_command == "verify-pair":
+        return verify_pair(root, args.case_id, args.pair_id, args.code_run)
+    if args.candidate_command == "retry-code":
+        return retry_code(root, args.case_id, args.pair_id, args.from_run_id)
     if args.candidate_command == "dispose":
         return dispose_candidate(root, args.case_id, args.run_id)
     if args.candidate_command == "interrupt":
@@ -482,8 +573,46 @@ def _run_candidate(root: Path, args: argparse.Namespace) -> object:
     if args.candidate_command == "show":
         return show_run(root, args.case_id, args.run_id)
     if args.candidate_command == "compare":
-        return compare_candidates(root, args.case_id, args.run_ids)
+        return compare_pair(root, args.case_id, args.pair_id)
+    if args.candidate_command == "show-pair":
+        return show_pair(root, args.case_id, args.pair_id)
     raise ValueError(f"unsupported candidate command: {args.candidate_command}")
+
+
+def _run_work(root: Path, args: argparse.Namespace) -> object:
+    if args.work_command == "create":
+        return create_work(root, args.case_id, args.contract, args.actor)
+    if args.work_command == "status":
+        return status_work(root, args.case_id)
+    if args.work_command == "next":
+        return next_work(root, args.case_id)
+    if args.work_command == "attach-pair":
+        return attach_pair(root, args.case_id, args.pair_id, args.code_run, args.actor)
+    if args.work_command == "task":
+        if args.work_task_command == "start":
+            return start_task(root, args.case_id, args.task_id, args.actor)
+        if args.work_task_command == "block":
+            return block_task(root, args.case_id, args.task_id, args.reason, args.actor)
+        if args.work_task_command == "unblock":
+            return unblock_task(root, args.case_id, args.task_id, args.actor)
+        if args.work_task_command == "complete":
+            return complete_task(
+                root,
+                args.case_id,
+                args.task_id,
+                args.evidence_ref,
+                args.actor,
+            )
+    if args.work_command == "implementation-complete":
+        return implementation_complete(root, args.case_id, args.actor)
+    if args.work_command == "replan":
+        return replan_work(root, args.case_id, args.contract, args.reason, args.actor)
+    if args.work_command == "resume":
+        packet = resume_packet(root, args.case_id)
+        return render_resume_markdown(packet) if args.format == "markdown" else packet
+    if args.work_command == "finish":
+        return finish_work(root, args.case_id, args.actor)
+    raise ValueError(f"unsupported work command: {args.work_command}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -507,12 +636,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         MemoryError,
         AmendmentError,
         AnchorError,
+        LegacyReadOnlyError,
+        PairNotFoundError,
+        PairStateError,
+        VerificationContractError,
+        WorkContractError,
+        WorkStateError,
         json.JSONDecodeError,
     ) as error:
         print(f"mosaic: error: {error}", file=sys.stderr)
         return 2
     if args.command == "show":
         sys.stdout.write(render_pack(result))
+    elif (
+        args.command == "work"
+        and args.work_command == "resume"
+        and args.format == "markdown"
+    ):
+        sys.stdout.write(str(result))
     else:
         sys.stdout.write(_json(result))
     return 0

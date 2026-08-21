@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0.0",
+  "contract_id": "VC-SPIKE-V03",
+  "checks": [
+    {
+      "id": "target-completed-ticket",
+      "role": "target",
+      "visibility": "public",
+      "argv": [
+        "python3",
+        "{frozen_public}/contract/target_completed_ticket.py"
+      ],
+      "frozen_inputs": ["target_completed_ticket.py"]
+    },
+    {
+      "id": "preserve-store-contract",
+      "role": "preservation",
+      "visibility": "public",
+      "argv": [
+        "python3",
+        "{frozen_public}/contract/preserve_store_contract.py"
+      ],
+      "frozen_inputs": ["preserve_store_contract.py"]
+    }
+  ],
+  "required_adapters": [],
+  "budgets": {
+    "max_seconds": 30,
+    "max_output_bytes": 65536
+  }
+}

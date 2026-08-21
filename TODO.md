@@ -2,97 +2,99 @@
 
 ## Mission
 
-Mosaic is an epistemic software harness. It updates beliefs about software
-with evidence and admits only interventions that remain viable under current
-and future change.
+Mosaic is a generic execution and admission harness for external agents. It
+stores epistemic claims, durable work state, frozen verification contracts,
+and proposal-bound human decisions without treating tests as the objective.
 
-## Repository state
+## Current release surface
 
-- Path: this tree (`mosaic`)
-- Branch: `master`
+- Package version: `0.3.0`
+- Decision Pack, run manifest, and verdict schema: `2.0.0`
+- Work Contract and ResumePacket schema: `1.0.0`
 - Runtime: Python 3.11+, no third-party dependencies
-- Isolation claimed only for macOS `/usr/bin/sandbox-exec`
-- Example application target: sibling `spike` (kitchen-ticket todos)
+- Real isolation claim: macOS only, and only after the `sandbox-exec` probe
+  succeeds
+- Mode: Normal Mode; do not edit constitution, hidden evaluator contents, raw
+  historian events, or memory policy
 
-Do not push unless asked. Normal Mode must not edit constitution, hidden
-evaluators, or memory policy.
+## Implemented
 
-## What is implemented
+Admission Plane:
 
-CLI: `init`, `investigate`, `evidence add`, `challenge`, `propose`, `decide`,
-`show`, `verify`, `rebuild`, `observation-plan`, `candidate
-prepare|exec|build|verify|compare|dispose|interrupt|show`, `tournament run`,
-`observe`, `memory invalidate|acknowledge`, `amend`, `ledger export|compare`.
+- `candidate prepare-pair` freezes an external verification contract and
+  creates paired zero-change/code candidates from one source snapshot.
+- Public checks use argv arrays and frozen inputs outside the candidate.
+- Results are `PASS | FAIL | ABSENT | ERROR`; target and preservation relations
+  fail closed.
+- Hidden output is verifier-only; general verdicts retain output hashes.
+- Mutation runs all deterministic Python mutants; property and hidden adapters
+  are explicit requirements.
+- Candidate freezing, retry lineage, deletion-aware change surface, actual
+  execution cost, and code-only Pareto comparison are recorded.
+- Proposal and human decision bind pair, run, snapshot, revision, floor digest,
+  evidence, claims, and ledger head. There is no override.
+- Configuration, documentation, and operational state changes remain
+  inadmissible without typed adapters.
 
-`decide CODE_CHANGE` requires a surviving undominated code candidate and an
-observation plan with `signal` and `rollback_trigger`. `NO_CHANGE` does not.
-`--override` records floor failures instead of hiding them.
+Execution Plane:
 
-Isolation: filtered or git-worktree candidate; Builder denied live
-constitution, hidden evaluators, historian, and future scenarios; Verifier
-cannot write the candidate.
+- `work create|status|next|attach-pair|implementation-complete|replan|resume|finish`
+  and `work task start|block|unblock|complete`.
+- Event-sourced single-worker Work State with deterministic task selection.
+- Versioned replan preserves goal fields and completed task definitions.
+- ResumePacket exposes durable external state without hidden evaluator details
+  or chain-of-thought.
+- `work finish` requires an exact accepted human decision and emits `DONE` or
+  `STOPPED` from the completion policy.
 
-Floors: public, hidden, mutation (`src/**/*.py`, skipping `__init__.py` and
-`__main__.py`), property, differential. Unconfigured is not a pass.
+Compatibility:
 
-## Automated tests
+- Decision Pack 1.0 cases are read-only.
+- Allowed legacy commands: `show`, integrity `verify`, `candidate show`, and
+  ledger export/compare.
+- No automatic migration or ledger rewrite.
 
-`PYTHONPATH=src python3 -m unittest discover -s tests -v`
-
-## Do not overclaim
-
-- No Linux/Windows isolation
-- No LLM Builder
-- Tournament runner exists; scenario generation does not
-- `observe` is CLI ingest, not a live deploy hook
-- Maintenance Mode is propose/holdout/ratify/rollback, not replay/shadow/canary
-- Ledger export is a witness file, not a notary
-- `permissions.yaml` is not a security boundary
-- Mosaic-as-`--repo` makes Mosaic's own tests the public floor. Use `spike`
-  or another application whose tests encode the issue.
-
-## Observed production-CLI cases
-
-- **REAL-001** (`/tmp/mosaic-real-case`, Mosaic-as-repo): isolation denials
-  held; public floor failed on Mosaic's suite; `CODE_CHANGE` without a
-  survivor was refused; override plus opposing incident superseded.
-- **SPIKE-002** (`/tmp/mosaic-spike-recheck`, `--repo` = sibling Spike):
-  `investigate --signal/--rollback-trigger` needed no JSON edit; zero-change
-  failed the defect test; code candidate passed public+mutation; `decide
-  CODE_CHANGE` accepted without override; Spike source stayed defective.
-
-Public docs for an open repository: `README.md`, `CONTRIBUTING.md`,
-`SECURITY.md`, `CODE_OF_CONDUCT.md`, `docs/architecture.md`, `docs/using.md`,
-and `docs/brand/`.
-
-## Next (only if still building Mosaic)
-
-1. Persist public-floor stdout/stderr on the verdict so a failed floor is
-   interpretable.
-2. Classify sandbox `PermissionError` as `denial` even when the Builder
-   process exits 0 after catching it.
-3. An LLM Builder only behind the existing sandboxed instruction boundary.
-4. Linux isolation only after the same denial probes pass.
-
-Do not start a multi-agent UI, marketplace, or untested isolation claim.
-
-## Commands for the next agent
+## Automated evidence
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
-PYTHONPATH=src python3 -m mosaic_harness --help
 ```
 
-Smoke against Spike, never against this tree as `--repo`:
+Portable tests cover frozen-input tamper resistance, target/preservation
+relations, required `ABSENT/ERROR`, full mutation traversal, hidden-output
+redaction, candidate snapshot invalidation, proposal binding, deterministic
+replay, replan/retry staleness, human finish, and legacy read-only behavior.
 
-```bash
-mkdir -p /tmp/mosaic-handoff-smoke
-PYTHONPATH=src python3 -m mosaic_harness --root /tmp/mosaic-handoff-smoke init
-PYTHONPATH=src python3 -m mosaic_harness --root /tmp/mosaic-handoff-smoke \
-  investigate SPIKE-SMOKE \
-  --issue ../spike/issue.md --repo ../spike \
-  --signal "test_completed_tickets_leave_the_active_rail passes" \
-  --rollback-trigger "Dispose the candidate; do not merge."
-PYTHONPATH=src python3 -m mosaic_harness --root /tmp/mosaic-handoff-smoke \
-  verify SPIKE-SMOKE
-```
+The full suite also passes outside the nested development sandbox with the real
+macOS isolation probe enabled. The sibling Spike smoke reached `DONE` through
+the real CLI and isolated Builder/Verifier: zero target `FAIL`, code target
+`PASS`, preservation `PASS` on both, ledger verification valid, and the source
+Spike repository clean.
+
+A separate ephemeral Codex session received only a non-terminal Spike
+ResumePacket. It exactly restored the objective, hard-constraint IDs,
+`PLANNED` state, next task, active pair, active run, and candidate snapshot
+without reading files or using tools. This is evidence for that packet and
+session boundary, not a universal long-running reliability claim.
+
+Isolation tests skip when the capability probe cannot run. A passing portable
+fake-runner suite alone is not an isolation claim.
+
+## Remaining release evidence
+
+1. Repeat the fresh-session experiment across blocked, replanned, verifying,
+   and stale-artifact states before making a broad reliability claim.
+2. Add typed admission adapters before enabling configuration, documentation,
+   or operational actions.
+3. Claim Linux or Windows isolation only after platform-specific denial probes
+   pass.
+
+## Explicitly out of scope for 0.3
+
+- parallel workers, leases, task-specific worktrees, and merge policy;
+- a multi-agent UI or marketplace;
+- an LLM Builder;
+- a network notary or timestamp authority;
+- automatic migration of legacy cases.
+
+Do not push or publish unless explicitly requested.

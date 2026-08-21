@@ -1,0 +1,86 @@
+{
+  "schema_version": "1.0.0",
+  "contract_id": "WC-CASE-ID",
+  "case_id": "CASE-ID",
+  "objective": "Describe the observable state that should become true.",
+  "constraints": [
+    {
+      "id": "C-TARGET",
+      "role": "target",
+      "force": "hard",
+      "statement": "Describe the target constraint.",
+      "evidence_condition": "Describe observable target evidence."
+    },
+    {
+      "id": "C-PRESERVATION",
+      "role": "preservation",
+      "force": "hard",
+      "statement": "Describe what must remain true.",
+      "evidence_condition": "Describe observable preservation evidence."
+    },
+    {
+      "id": "C-BOUNDARY",
+      "role": "boundary",
+      "force": "hard",
+      "statement": "Describe the scope boundary.",
+      "evidence_condition": "Describe evidence that work stayed in scope."
+    },
+    {
+      "id": "C-RESOURCE",
+      "role": "resource",
+      "force": "soft",
+      "statement": "Describe the time, cost, or disruption limit.",
+      "evidence_condition": "Describe how actual resource use is measured."
+    }
+  ],
+  "non_goals": [
+    "Describe an explicitly excluded outcome."
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "statement": "Describe one observable acceptance criterion.",
+      "verification_check_ids": [
+        "target-check"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-INVESTIGATE",
+      "kind": "investigate",
+      "description": "Gather discriminating evidence.",
+      "depends_on": [],
+      "read_set": [],
+      "write_set": [],
+      "acceptance_criteria_ids": [
+        "AC-1"
+      ]
+    },
+    {
+      "id": "T-IMPLEMENT",
+      "kind": "implement",
+      "description": "Implement the smallest admissible intervention.",
+      "depends_on": [
+        "T-INVESTIGATE"
+      ],
+      "read_set": [],
+      "write_set": [],
+      "acceptance_criteria_ids": [
+        "AC-1"
+      ]
+    }
+  ],
+  "completion_policy": {
+    "success_outcomes": [
+      "CODE_CHANGE",
+      "NO_CHANGE"
+    ],
+    "stop_outcomes": [
+      "INSTRUMENT_FIRST",
+      "POLICY_CONFLICT",
+      "INSUFFICIENT_EVIDENCE",
+      "ISSUE_REJECTED"
+    ]
+  }
+}

@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 
 from mosaic_harness.admission import experiment_ref, verdict_measures
 from mosaic_harness.builder import apply_script_source, confined_writes, load_instructions
+from mosaic_harness.compat import require_writable_pack
 from mosaic_harness.executor import (
     MANIFEST_VERSION,
     CandidateNotFoundError,
@@ -106,6 +107,7 @@ def create_candidate(
     repository = repository.resolve()
     harness_root, _ = ensure_runtime(workspace)
     pack = CaseStore(harness_root).load(case_id)
+    require_writable_pack(pack)
     run_id = _new_run_id()
     run_root = run_path(harness_root, run_id)
     workspace_root = run_root / "workspace"
@@ -239,14 +241,17 @@ def run_role(
         raise ValueError("role must be builder or verifier")
     if not command:
         raise ValueError("command must not be empty")
-    require_isolation()
     workspace = workspace.resolve()
     harness_root, _ = ensure_runtime(workspace)
     manifest = _load_manifest(harness_root, run_id)
+    require_writable_pack(CaseStore(harness_root).load(case_id))
+    require_isolation()
     if manifest["case_id"] != case_id:
         raise RunStateError(f"run {run_id} does not belong to case {case_id}")
     if role == "builder" and manifest["kind"] == "zero-change":
         raise RunStateError("zero-change candidates do not run a builder command")
+    if role == "builder" and manifest.get("frozen_snapshot") is not None:
+        raise RunStateError("frozen candidates cannot run another builder command")
     if manifest["state"] == "disposed":
         raise RunStateError(f"run already disposed: {run_id}")
 
@@ -284,9 +289,13 @@ def run_role(
         budget=active_budget,
         env=environment,
     )
+    hidden_root = Path(
+        manifest.get("hidden_evaluator_root")
+        or (harness_root / "evaluators" / "hidden")
+    )
     leaked = scan_for_tokens(
         [result["stdout"], result["stderr"], *workspace_texts(Path(manifest["workspace_root"]))],
-        hidden_tokens(Path(manifest["hidden_evaluator_root"])),
+        hidden_tokens(hidden_root),
     )
     result["hidden_content_leaked"] = bool(leaked)
     result["state"] = "interrupted" if result["interrupted"] else f"{role}_finished"
@@ -308,7 +317,18 @@ def run_role(
         )
         return result
 
-    manifest["state"] = "builder_finished" if role == "builder" else "verdict_recorded"
+    used = manifest.setdefault("budget_used", {"seconds": 0.0, "output_bytes": 0})
+    used["seconds"] = round(float(used.get("seconds", 0.0)) + float(result["budget"]["used_seconds"]), 3)
+    used["output_bytes"] = int(used.get("output_bytes", 0)) + int(
+        result["budget"]["used_output_bytes"]
+    )
+    manifest["state"] = (
+        "builder_active"
+        if role == "builder" and manifest.get("pair_id")
+        else "builder_finished"
+        if role == "builder"
+        else "verdict_recorded"
+    )
     manifest["updated_at"] = utc_now()
     _save_manifest(harness_root, manifest)
     if role == "builder":
@@ -334,10 +354,11 @@ def verify_candidate(
     *,
     mutation_probe: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    require_isolation()
     workspace = workspace.resolve()
     harness_root, _ = ensure_runtime(workspace)
     manifest = _load_manifest(harness_root, run_id)
+    require_writable_pack(CaseStore(harness_root).load(case_id))
+    require_isolation()
     if manifest["case_id"] != case_id:
         raise RunStateError(f"run {run_id} does not belong to case {case_id}")
     if manifest["state"] == "disposed":
@@ -468,6 +489,7 @@ def build_candidate(
     workspace = workspace.resolve()
     harness_root, _ = ensure_runtime(workspace)
     manifest = _load_manifest(harness_root, run_id)
+    require_writable_pack(CaseStore(harness_root).load(case_id))
     if manifest["case_id"] != case_id:
         raise RunStateError(f"run {run_id} does not belong to case {case_id}")
     if manifest["kind"] == "zero-change":
@@ -516,10 +538,12 @@ def dispose_candidate(workspace: Path, case_id: str, run_id: str) -> dict[str, A
     workspace = workspace.resolve()
     harness_root, _ = ensure_runtime(workspace)
     manifest = _load_manifest(harness_root, run_id)
+    require_writable_pack(CaseStore(harness_root).load(case_id))
     if manifest["case_id"] != case_id:
         raise RunStateError(f"run {run_id} does not belong to case {case_id}")
     dispose_tree(Path(manifest["workspace_root"]))
-    dispose_tree(Path(manifest["hidden_evaluator_root"]))
+    if manifest.get("hidden_evaluator_root"):
+        dispose_tree(Path(manifest["hidden_evaluator_root"]))
     manifest["state"] = "disposed"
     manifest["updated_at"] = utc_now()
     _save_manifest(harness_root, manifest)
@@ -531,6 +555,7 @@ def interrupt_run(workspace: Path, case_id: str, run_id: str) -> dict[str, Any]:
     workspace = workspace.resolve()
     harness_root, _ = ensure_runtime(workspace)
     manifest = _load_manifest(harness_root, run_id)
+    require_writable_pack(CaseStore(harness_root).load(case_id))
     if manifest["case_id"] != case_id:
         raise RunStateError(f"run {run_id} does not belong to case {case_id}")
     manifest["state"] = "interrupted"

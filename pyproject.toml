@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mosaic-epistemic-harness"
-version = "0.1.0"
-description = "An evidence-first decision harness for software change assurance"
+version = "0.3.0"
+description = "A constraint-driven execution and admission harness for agentic software change"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

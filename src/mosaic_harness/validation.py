@@ -19,6 +19,33 @@ def _require(mapping: dict[str, Any], key: str, expected: type, errors: list[str
 
 
 def validate_decision_pack(pack: dict[str, Any]) -> dict[str, Any]:
+    if pack.get("schema_version") == "1.0.0":
+        required = {
+            "case_id",
+            "issue",
+            "scope",
+            "constraints",
+            "claims",
+            "evidence",
+            "verification_plan",
+            "rollback_plan",
+            "observation_plan",
+            "unresolved_questions",
+            "outcome",
+        }
+        missing = sorted(required - set(pack))
+        if missing:
+            raise DecisionPackValidationError(
+                "legacy decision pack is missing fields: " + ", ".join(missing)
+            )
+        return {
+            "valid": True,
+            "legacy_read_only": True,
+            "case_id": pack["case_id"],
+            "claim_count": len(pack["claims"]),
+            "evidence_count": len(pack["evidence"]),
+            "outcome": pack["outcome"]["type"],
+        }
     errors: list[str] = []
     if pack.get("schema_version") != SCHEMA_VERSION:
         errors.append(f"schema_version must equal {SCHEMA_VERSION}")

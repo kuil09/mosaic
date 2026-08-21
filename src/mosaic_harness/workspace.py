@@ -133,14 +133,20 @@ def materialize_repository(
         except (OSError, RuntimeError):
             if destination.exists():
                 shutil.rmtree(destination)
-    copy_repository(
+    copied = copy_repository(
         repository,
         destination,
         max_files=max_files,
         max_file_bytes=max_file_bytes,
     )
+    if copied["truncated"] or copied["skipped_large_file_count"]:
+        if destination.exists():
+            shutil.rmtree(destination)
+        raise RuntimeError(
+            "bounded repository copy was incomplete; use a Git repository or raise explicit limits"
+        )
     strip_protected_paths(destination)
-    return {"method": "bounded-copy", "commit": commit}
+    return {"method": "bounded-copy", "commit": commit, **copied}
 
 
 def copy_tree_if_present(source: Path, destination: Path) -> int:
