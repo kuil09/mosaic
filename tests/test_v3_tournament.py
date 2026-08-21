@@ -8,12 +8,13 @@ from pathlib import Path
 
 from mosaic_harness.candidate import create_candidate, run_role, verify_candidate
 from mosaic_harness.historian import EventLedger
+from mosaic_harness.isolation import isolation_available
 from mosaic_harness.tournament import TournamentError, run_tournament
 from mosaic_harness.workflow import initialize_workspace, investigate
 
 
 def isolation_supported() -> bool:
-    return sys.platform == "darwin" and Path("/usr/bin/sandbox-exec").is_file()
+    return isolation_available()
 
 
 class MosaicPhaseDTest(unittest.TestCase):

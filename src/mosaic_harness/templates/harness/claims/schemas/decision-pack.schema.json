@@ -23,7 +23,7 @@
     "provenance"
   ],
   "properties": {
-    "schema_version": { "const": "1.0.0" },
+    "schema_version": { "const": "2.0.0" },
     "case_id": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -116,7 +116,43 @@
       "type": "array",
       "items": { "$ref": "#/$defs/experimentRef" }
     },
-    "admission": { "$ref": "#/$defs/admission" }
+    "admission": { "$ref": "#/$defs/admission" },
+    "latest_proposal": {
+      "type": "object",
+      "required": [
+        "proposal_id",
+        "outcome",
+        "proposal_event_hash",
+        "ledger_head",
+        "base_revision",
+        "claim_refs",
+        "evidence_refs"
+      ],
+      "properties": {
+        "proposal_id": { "type": "string" },
+        "outcome": { "$ref": "#/$defs/outcomeType" },
+        "proposal_event_hash": { "$ref": "#/$defs/sha256" },
+        "ledger_head": { "$ref": "#/$defs/sha256" },
+        "base_revision": { "type": "string" },
+        "claim_refs": { "type": "array", "items": { "type": "string" } },
+        "evidence_refs": { "type": "array", "items": { "type": "string" } },
+        "pair_id": { "type": ["string", "null"] },
+        "code_run_id": { "type": ["string", "null"] },
+        "code_snapshot": { "type": ["string", "null"] },
+        "floor_definition_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] }
+      },
+      "additionalProperties": true
+    },
+    "work_contract_ref": {
+      "type": "object",
+      "required": ["contract_id", "revision", "sha256"],
+      "properties": {
+        "contract_id": { "type": "string" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    }
   },
   "$defs": {
     "sha256": {
@@ -247,19 +283,27 @@
         "rationale": { "type": "string", "minLength": 1 },
         "conditions": { "type": "array", "items": { "type": "string" } },
         "evidence_refs": { "type": "array", "items": { "type": "string" } },
-        "approved_by": { "type": "string" }
+        "approved_by": { "type": "string" },
+        "proposal_id": { "type": "string" },
+        "pair_id": { "type": ["string", "null"] },
+        "code_run_id": { "type": ["string", "null"] },
+        "code_snapshot": { "type": ["string", "null"] }
       },
       "additionalProperties": false
     },
     "experimentRef": {
       "type": "object",
-      "required": ["run_id", "kind", "revision", "verdict_ref", "floor_passed", "isolation"],
+      "required": ["run_id", "kind", "revision", "verdict_ref", "isolation"],
       "properties": {
         "run_id": { "type": "string" },
+        "pair_id": { "type": "string" },
         "kind": { "enum": ["code", "zero-change"] },
         "revision": { "type": "string" },
         "verdict_ref": { "type": "string" },
         "floor_passed": { "type": "boolean" },
+        "eligible": { "type": "boolean" },
+        "snapshot": { "type": "string" },
+        "floor_definition_sha256": { "$ref": "#/$defs/sha256" },
         "isolation": { "type": "object" }
       },
       "additionalProperties": true
@@ -268,11 +312,17 @@
       "type": "object",
       "required": ["status", "surviving_run_ids", "dominated_run_ids", "floor_failures", "rule"],
       "properties": {
-        "status": { "enum": ["ungated", "refused", "eligible", "overridden"] },
+        "status": { "enum": ["ungated", "refused", "eligible"] },
         "surviving_run_ids": { "type": "array", "items": { "type": "string" } },
         "dominated_run_ids": { "type": "array", "items": { "type": "string" } },
         "floor_failures": { "type": "array", "items": { "type": "string" } },
-        "rule": { "const": "hard-floor-then-pareto" }
+        "rule": {
+          "enum": [
+            "hard-floor-then-pareto",
+            "proposal-bound-non-state-changing",
+            "target-improvement-then-code-pareto"
+          ]
+        }
       },
       "additionalProperties": true
     }

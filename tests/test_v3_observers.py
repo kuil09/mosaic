@@ -57,39 +57,30 @@ class MosaicPhaseETest(unittest.TestCase):
         self.assertEqual(pack["observation_plan"][0]["rollback_trigger"], "dispose candidate")
         self.assertTrue(verify_workspace(self.root, "ISSUE-E")["projection_integrity"]["valid"])
 
-    def test_code_change_requires_observation_signal(self) -> None:
-        with self.assertRaisesRegex(AdmissionError, "observation plan"):
+    def test_code_change_requires_a_matching_admissible_proposal(self) -> None:
+        proposal = propose(self.root, "ISSUE-E")
+        with self.assertRaisesRegex(AdmissionError, "outcome must match"):
             decide(
                 self.root,
                 "ISSUE-E",
                 Outcome.CODE_CHANGE,
                 "ship",
                 "eng@example.com",
+                proposal_id=proposal["latest_proposal"]["proposal_id"],
             )
 
-    def test_override_with_signal_then_incident_supersedes(self) -> None:
-        store = CaseStore(self.root / ".harness")
-        pack = store.load("ISSUE-E")
-        pack["observation_plan"] = [
-            {
-                "id": "OP-1",
-                "observation": "coupon restore latency",
-                "signal": "p95 restore > 2s",
-                "rollback_trigger": "revert candidate branch",
-                "status": "required",
-            }
-        ]
-        store.save(pack)
-        decided = decide(
-            self.root,
-            "ISSUE-E",
-            Outcome.CODE_CHANGE,
-            "accept despite missing candidate",
-            "eng@example.com",
-            override=True,
-        )
-        self.assertEqual(decided["outcome"]["status"], "accepted")
-        observe(
+    def test_override_argument_is_removed_and_observer_cannot_decide(self) -> None:
+        with self.assertRaises(TypeError):
+            decide(
+                self.root,
+                "ISSUE-E",
+                Outcome.CODE_CHANGE,
+                "attempt override",
+                "eng@example.com",
+                proposal_id="PR-invalid",
+                override=True,
+            )
+        observed = observe(
             self.root,
             "ISSUE-E",
             kind="incident",
@@ -97,15 +88,7 @@ class MosaicPhaseETest(unittest.TestCase):
             source_ref="pager-1",
             direction="opposing",
         )
-        after = store.load("ISSUE-E")
-        self.assertEqual(after["outcome"]["status"], "superseded")
-        self.assertEqual(after["outcome"]["type"], Outcome.CODE_CHANGE.value)
-        self.assertTrue(all(item["freshness"] == "stale" for item in after["evidence"]))
-        self.assertTrue(
-            any("Post-change observation" in item for item in after["unresolved_questions"])
-        )
-        proposed = propose(self.root, "ISSUE-E")
-        self.assertEqual(proposed["outcome"]["type"], Outcome.INSUFFICIENT_EVIDENCE.value)
+        self.assertNotEqual(observed["outcome"]["status"], "accepted")
 
 
 if __name__ == "__main__":

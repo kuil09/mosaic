@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any
 
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "2.0.0"
 
 
 class Outcome(str, Enum):

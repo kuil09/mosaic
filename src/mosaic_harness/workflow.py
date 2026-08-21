@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import secrets
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from mosaic_harness.admission import collect_verdicts, require_admission
+from mosaic_harness.admission import require_v2_admission
+from mosaic_harness.compat import LegacyReadOnlyError, require_writable_pack
 from mosaic_harness.domain import (
     Outcome,
     SCHEMA_VERSION,
@@ -84,6 +86,18 @@ def ensure_runtime(workspace: Path) -> tuple[Path, dict[str, Any]]:
     return _ensure_runtime(workspace)
 
 
+def _refresh_work_projection_if_present(workspace: Path, case_id: str) -> None:
+    harness_root = _harness_root(workspace)
+    if any(
+        event.get("case_id") == case_id
+        and event.get("type") == "work_contract_registered"
+        for event in EventLedger(harness_root).read()
+    ):
+        from mosaic_harness.work import status_work
+
+        status_work(workspace, case_id)
+
+
 def initialize_workspace(workspace: Path) -> dict[str, Any]:
     workspace = workspace.resolve()
     harness_root, state = _ensure_runtime(workspace)
@@ -97,6 +111,7 @@ def initialize_workspace(workspace: Path) -> dict[str, Any]:
         "harness/constitution/maintenance.md": harness_root / "constitution" / "maintenance.md",
         "harness/constitution/permissions.yaml": harness_root / "constitution" / "permissions.yaml",
         "harness/claims/schemas/decision-pack.schema.json": harness_root / "claims" / "schemas" / "decision-pack.schema.json",
+        "harness/contracts/work-contract.template.json": harness_root / "contracts" / "work-contract.template.json",
         "harness/future/scenarios/SCHEMA.md": harness_root / "future" / "scenarios" / "SCHEMA.md",
     }
     created: list[str] = []
@@ -188,6 +203,7 @@ def set_observation_plan(
     harness_root = _harness_root(workspace)
     store = CaseStore(harness_root)
     pack = store.load(case_id)
+    require_writable_pack(pack)
     pack["observation_plan"] = [
         _observation_item(
             signal=signal.strip(),
@@ -224,6 +240,10 @@ def investigate(
     _ensure_runtime(workspace)
     harness_root = _harness_root(workspace)
     store = CaseStore(harness_root)
+    if store.exists(case_id) and store.load(case_id).get("schema_version") == "1.0.0":
+        raise LegacyReadOnlyError(
+            "schema 1.0.0 cases are read-only; create a new v2 case id"
+        )
     if store.exists(case_id) and not replace:
         raise ValueError(f"case already exists: {case_id}; pass --replace to create a new projection")
     issue_path = issue_path.resolve()
@@ -410,6 +430,7 @@ def add_evidence(
     harness_root = _harness_root(workspace)
     store = CaseStore(harness_root)
     pack = store.load(case_id)
+    require_writable_pack(pack)
     claim = next((item for item in pack["claims"] if item["id"] == claim_id), None)
     if claim is None:
         raise ValueError(f"claim not found: {claim_id}")
@@ -523,7 +544,43 @@ def propose(workspace: Path, case_id: str, actor: str = "mosaic") -> dict[str, A
     harness_root = _harness_root(workspace)
     store = CaseStore(harness_root)
     pack = store.load(case_id)
+    require_writable_pack(pack)
     outcome, rationale, evidence_refs = _automatic_outcome(pack)
+    pair_verdict: dict[str, Any] | None = None
+    if outcome == Outcome.CODE_CHANGE:
+        from mosaic_harness.pair_verifier import latest_eligible_pair
+        work_registered = any(
+            event.get("case_id") == case_id
+            and event.get("type") == "work_contract_registered"
+            for event in EventLedger(harness_root).read()
+        )
+        if work_registered:
+            from mosaic_harness.executor import load_json
+            from mosaic_harness.pair import pair_verdict_path
+            from mosaic_harness.work import rebuild_work_state
+
+            work_state = rebuild_work_state(workspace, case_id)
+            verdict_path = (
+                pair_verdict_path(
+                    harness_root,
+                    work_state["active_pair_id"],
+                    work_state["active_code_run_id"],
+                )
+                if work_state.get("active_pair_id") and work_state.get("active_code_run_id")
+                else None
+            )
+            if work_state["state"] == "VERIFIED" and verdict_path and verdict_path.is_file():
+                pair_verdict = load_json(verdict_path)
+        else:
+            pair_verdict = latest_eligible_pair(workspace, case_id)
+        if pair_verdict is None:
+            outcome = Outcome.INSUFFICIENT_EVIDENCE
+            rationale = (
+                "The code hypothesis is supported, but no frozen experiment pair "
+                "demonstrates target improvement with preserved behavior."
+            )
+            evidence_refs = []
+    proposal_id = f"PR-{secrets.token_hex(6)}"
     proposal = {
         "type": outcome.value,
         "status": "provisional",
@@ -531,15 +588,41 @@ def propose(workspace: Path, case_id: str, actor: str = "mosaic") -> dict[str, A
         "rationale": rationale,
         "conditions": [],
         "evidence_refs": evidence_refs,
+        "proposal_id": proposal_id,
     }
     if outcome == Outcome.INSUFFICIENT_EVIDENCE:
         proposal["conditions"] = [
             "Run a fresh probe that distinguishes the material rival hypotheses.",
             "Do not treat a passing floor test as causal evidence by itself.",
         ]
+    referenced_evidence = set(evidence_refs)
+    claim_refs = [
+        claim["id"]
+        for claim in pack["claims"]
+        if referenced_evidence.intersection(claim.get("evidence_refs", []))
+    ]
+    proposal_record = {
+        "proposal_id": proposal_id,
+        "outcome": outcome.value,
+        "claim_refs": claim_refs,
+        "evidence_refs": evidence_refs,
+        "base_revision": pack["scope"]["base_revision"],
+        "pair_id": pair_verdict.get("pair_id") if pair_verdict else None,
+        "code_run_id": pair_verdict.get("code_run_id") if pair_verdict else None,
+        "code_snapshot": pair_verdict.get("code_snapshot") if pair_verdict else None,
+        "floor_definition_sha256": (
+            pair_verdict.get("floor_definition_sha256") if pair_verdict else None
+        ),
+    }
     event = EventLedger(harness_root).append(
-        "decision_proposed", case_id, proposal, actor=actor
+        "decision_proposed",
+        case_id,
+        {**proposal, **proposal_record},
+        actor=actor,
     )
+    proposal_record["proposal_event_hash"] = event["hash"]
+    proposal_record["ledger_head"] = event["hash"]
+    pack["latest_proposal"] = proposal_record
     pack["outcome"] = proposal
     pack["updated_at"] = utc_now()
     validate_decision_pack(pack)
@@ -548,6 +631,7 @@ def propose(workspace: Path, case_id: str, actor: str = "mosaic") -> dict[str, A
     )
     pack["provenance"]["event_head"] = projection_event["hash"]
     store.save(pack)
+    _refresh_work_projection_if_present(workspace, case_id)
     return pack
 
 
@@ -561,6 +645,7 @@ def challenge(
     harness_root = _harness_root(workspace)
     store = CaseStore(harness_root)
     pack = store.load(case_id)
+    require_writable_pack(pack)
     if emit_evaluators:
         from mosaic_harness.verifiers import emit_challenger_evaluators
 
@@ -606,6 +691,7 @@ def challenge(
     )
     pack["provenance"]["event_head"] = projection_event["hash"]
     store.save(pack)
+    _refresh_work_projection_if_present(workspace, case_id)
     return pack
 
 
@@ -618,6 +704,7 @@ def record_experiment(
     harness_root = _harness_root(workspace)
     store = CaseStore(harness_root)
     pack = store.load(case_id)
+    require_writable_pack(pack)
     experiments = [
         item
         for item in pack.get("experiments", [])
@@ -630,6 +717,7 @@ def record_experiment(
     projection_event = _anchor_projection(EventLedger(harness_root), pack, case_id, actor)
     pack["provenance"]["event_head"] = projection_event["hash"]
     store.save(pack)
+    _refresh_work_projection_if_present(workspace, case_id)
     return pack
 
 
@@ -641,7 +729,7 @@ def decide(
     actor: str,
     conditions: list[str] | None = None,
     *,
-    override: bool = False,
+    proposal_id: str,
 ) -> dict[str, Any]:
     if not rationale.strip():
         raise ValueError("rationale must not be empty")
@@ -650,20 +738,21 @@ def decide(
     harness_root = _harness_root(workspace)
     store = CaseStore(harness_root)
     pack = store.load(case_id)
-    admission = require_admission(
-        outcome,
-        collect_verdicts(harness_root, case_id),
-        override=override,
-        pack=pack,
+    require_writable_pack(pack)
+    proposal = pack.get("latest_proposal") or {}
+    events = EventLedger(harness_root).read()
+    proposal_hash = proposal.get("proposal_event_hash")
+    proposal_index = next(
+        (index for index, item in enumerate(events) if item.get("hash") == proposal_hash),
+        None,
     )
+    if proposal_index is None:
+        raise ValueError("latest proposal event is missing from the verified ledger")
+    later = events[proposal_index + 1 :]
+    if len(later) != 1 or later[0].get("type") != "projection_materialized":
+        raise ValueError("proposal is stale; run propose again after the latest state change")
+    admission = require_v2_admission(workspace, pack, outcome, proposal_id)
     pack["admission"] = admission
-    if admission["status"] == "overridden":
-        questions = list(pack.get("unresolved_questions", []))
-        failures = ", ".join(admission["floor_failures"]) or "none recorded"
-        note = f"Override accepted {outcome.value} despite floor failures: {failures}."
-        if note not in questions:
-            questions.append(note)
-        pack["unresolved_questions"] = questions
     decision = {
         "type": outcome.value,
         "status": "accepted",
@@ -672,6 +761,10 @@ def decide(
         "conditions": conditions or [],
         "evidence_refs": [item["id"] for item in pack["evidence"]],
         "approved_by": actor,
+        "proposal_id": proposal_id,
+        "pair_id": proposal.get("pair_id"),
+        "code_run_id": proposal.get("code_run_id"),
+        "code_snapshot": proposal.get("code_snapshot"),
     }
     event = EventLedger(harness_root).append(
         "decision_accepted", case_id, decision, actor=actor
@@ -684,6 +777,7 @@ def decide(
     )
     pack["provenance"]["event_head"] = projection_event["hash"]
     store.save(pack)
+    _refresh_work_projection_if_present(workspace, case_id)
     return pack
 
 
@@ -692,7 +786,14 @@ def verify_workspace(workspace: Path, case_id: str | None = None) -> dict[str, A
     ledger = EventLedger(harness_root)
     events = ledger.read()
     result: dict[str, Any] = {"ledger": ledger.verify_events(events)}
-    result["schema"] = check_schema_drift(workspace)
+    legacy = False
+    if case_id is not None:
+        legacy = CaseStore(harness_root).load(case_id).get("schema_version") == "1.0.0"
+    result["schema"] = (
+        {"checked": False, "reason": "legacy schema is read-only"}
+        if legacy
+        else check_schema_drift(workspace)
+    )
     from mosaic_harness.memory import check_conflicts
 
     check_conflicts(harness_root)
@@ -720,6 +821,22 @@ def verify_workspace(workspace: Path, case_id: str | None = None) -> dict[str, A
             "event_hash": current_head,
             "projection_sha256": actual_digest,
         }
+        if any(
+            event.get("case_id") == case_id
+            and event.get("type") == "work_contract_registered"
+            for event in events
+        ):
+            from mosaic_harness.work import rebuild_work_state
+
+            work_state = rebuild_work_state(workspace, case_id)
+            result["work_state_rebuild"] = {
+                "valid": True,
+                "state": work_state["state"],
+                "contract_revision": work_state["contract_revision"],
+                "projection_sha256": sha256_bytes(
+                    canonical_json(work_state).encode("utf-8")
+                ),
+            }
     return result
 
 
@@ -728,6 +845,8 @@ def rebuild_case(workspace: Path, case_id: str) -> tuple[dict[str, Any], Path]:
     ledger = EventLedger(harness_root)
     events = ledger.read()
     ledger.verify_events(events)
+    current = CaseStore(harness_root).load(case_id)
+    require_writable_pack(current)
     projection_events = [
         event
         for event in events

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from mosaic_harness.cli import main
 from mosaic_harness.historian import EventLedger
+from mosaic_harness.isolation import isolation_available
 from mosaic_harness.workflow import initialize_workspace, investigate, rebuild_case, verify_workspace
 
 
@@ -17,7 +18,7 @@ HIDDEN_TOKEN = "MOSAIC-HIDDEN-EVALUATOR-TOKEN-7f3c2a91"
 
 
 def isolation_supported() -> bool:
-    return sys.platform == "darwin" and Path("/usr/bin/sandbox-exec").is_file()
+    return isolation_available()
 
 
 class MosaicV1IsolationTest(unittest.TestCase):
@@ -251,43 +252,25 @@ class MosaicV1IsolationTest(unittest.TestCase):
         self.assertGreater(after["ledger"]["event_count"], before["ledger"]["event_count"])
         self.assertEqual(manifest["kind"], "zero-change")
 
-    def test_cli_prepare_inspects_filesystem_and_environment(self) -> None:
-        status, payload, stderr = self._cli(
-            [
-                "candidate",
-                "prepare",
-                "ISSUE-123",
-                "--repo",
-                str(self.repository),
-                "--kind",
-                "zero-change",
-            ]
-        )
-        self.assertEqual(status, 0, stderr)
-        assert payload is not None
-        workspace = Path(payload["workspace_root"])
-        self.assertTrue((workspace / "src" / "coupon.py").is_file())
-        self.assertFalse((workspace / ".harness" / "evaluators" / "hidden").exists())
-        self.assertEqual(payload["isolation"]["mechanism"], "sandbox-exec")
-        self.assertEqual(payload["isolation"]["tested_platform"], "darwin")
-        self.assertIn("MOSAIC_ROLE", payload["environment"])
-        self.assertEqual(payload["environment"]["MOSAIC_ROLE"], "builder")
+    def test_cli_legacy_prepare_command_is_removed(self) -> None:
+        with self.assertRaises(SystemExit):
+            self._cli(
+                [
+                    "candidate",
+                    "prepare",
+                    "ISSUE-123",
+                    "--repo",
+                    str(self.repository),
+                    "--kind",
+                    "zero-change",
+                ]
+            )
 
     @unittest.skipUnless(isolation_supported(), "V1 process isolation is tested on macOS sandbox-exec")
     def test_cli_exec_denies_hidden_evaluator_read(self) -> None:
-        status, prepared, stderr = self._cli(
-            [
-                "candidate",
-                "prepare",
-                "ISSUE-123",
-                "--repo",
-                str(self.repository),
-                "--kind",
-                "code",
-            ]
-        )
-        self.assertEqual(status, 0, stderr)
-        assert prepared is not None
+        from mosaic_harness.candidate import create_candidate
+
+        prepared = create_candidate(self.root, "ISSUE-123", self.repository, kind="code")
         hidden = self.repository / ".harness" / "evaluators" / "hidden" / "holdout.eval"
         status, payload, stderr = self._cli(
             [

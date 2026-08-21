@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from mosaic_harness.domain import Outcome
+from mosaic_harness.compat import require_writable_pack
 from mosaic_harness.historian import EventLedger
 from mosaic_harness.storage import CaseStore
 from mosaic_harness.util import utc_now
@@ -30,6 +31,7 @@ def apply_contradicting_observation(workspace: Path, case_id: str, actor: str) -
     harness_root = _harness_root(workspace)
     store = CaseStore(harness_root)
     pack = store.load(case_id)
+    require_writable_pack(pack)
     outcome = pack.get("outcome") or {}
     if outcome.get("status") != "accepted" or outcome.get("type") not in STATE_CHANGING:
         return pack
@@ -67,6 +69,7 @@ def observe(
         raise ObserverError(f"unsupported observation kind: {kind}")
     harness_root = _harness_root(workspace)
     pack = CaseStore(harness_root).load(case_id)
+    require_writable_pack(pack)
     claim = claim_id or pack["claims"][0]["id"]
     pack, evidence = add_evidence(
         workspace,

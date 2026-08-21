@@ -13,20 +13,23 @@ from pathlib import Path
 from mosaic_harness.admission import AdmissionError
 from mosaic_harness.builder import BuilderPathError
 from mosaic_harness.candidate import build_candidate, create_candidate, verify_candidate
-from mosaic_harness.cli import main
+from mosaic_harness.cli import build_parser, main
 from mosaic_harness.domain import Outcome
+from mosaic_harness.isolation import isolation_available
 from mosaic_harness.schema import SchemaDriftError
 from mosaic_harness.workflow import (
+    add_evidence,
     decide,
     initialize_workspace,
     investigate,
+    propose,
     rebuild_case,
     verify_workspace,
 )
 
 
 def isolation_supported() -> bool:
-    return sys.platform == "darwin" and Path("/usr/bin/sandbox-exec").is_file()
+    return isolation_available()
 
 
 def git_available() -> bool:
@@ -187,6 +190,7 @@ class MosaicPhaseATest(unittest.TestCase):
         self.assertTrue(rebuilt["experiments"][0]["floor_passed"])
 
     def test_decide_code_change_without_surviving_candidate_is_refused(self) -> None:
+        proposal = propose(self.root, "ISSUE-123")
         with self.assertRaises(AdmissionError):
             decide(
                 self.root,
@@ -194,71 +198,54 @@ class MosaicPhaseATest(unittest.TestCase):
                 Outcome.CODE_CHANGE,
                 "ship it",
                 "engineer@example.com",
+                proposal_id=proposal["latest_proposal"]["proposal_id"],
             )
         pack = verify_workspace(self.root, "ISSUE-123")
         self.assertEqual(pack["decision_pack"]["outcome"], "INSUFFICIENT_EVIDENCE")
 
     def test_decide_no_change_remains_valid_without_candidate(self) -> None:
+        for claim_id, direction in (
+            ("H-EXPECTED-BEHAVIOR", "supporting"),
+            ("H-CODE-DEFECT", "opposing"),
+            ("H-POLICY-CONFLICT", "opposing"),
+        ):
+            add_evidence(
+                self.root,
+                "ISSUE-123",
+                claim_id,
+                direction=direction,
+                strength="strong",
+                summary=f"Evidence for {claim_id}.",
+                source_type="test",
+                source_ref=claim_id,
+            )
+        proposal = propose(self.root, "ISSUE-123")
         pack = decide(
             self.root,
             "ISSUE-123",
             Outcome.NO_CHANGE,
             "Current behavior matches policy.",
             "engineer@example.com",
+            proposal_id=proposal["latest_proposal"]["proposal_id"],
         )
         self.assertEqual(pack["outcome"]["type"], Outcome.NO_CHANGE.value)
 
-    @unittest.skipUnless(isolation_supported(), "V1 process isolation is tested on macOS sandbox-exec")
-    def test_cli_refuses_code_change_when_zero_change_passed_and_override_records_failure(self) -> None:
-        zero = create_candidate(self.root, "ISSUE-123", self.repository, kind="zero-change")
-        verify_candidate(self.root, "ISSUE-123", zero["run_id"])
-        code = create_candidate(self.root, "ISSUE-123", self.repository, kind="code")
-        script = self.root / "break.json"
-        script.write_text(
-            json.dumps(
+    def test_cli_has_no_admission_override(self) -> None:
+        with self.assertRaises(SystemExit):
+            build_parser().parse_args(
                 [
-                    {
-                        "op": "write",
-                        "path": "src/coupon.py",
-                        "contents": "def restore_coupon():\n    raise RuntimeError('broken')\n",
-                    }
+                    "decide",
+                    "ISSUE-123",
+                    "CODE_CHANGE",
+                    "--proposal",
+                    "PR-test",
+                    "--override",
+                    "--actor",
+                    "engineer@example.com",
+                    "--rationale",
+                    "attempt to bypass the gate",
                 ]
-            ),
-            encoding="utf-8",
-        )
-        build_candidate(self.root, "ISSUE-123", code["run_id"], script)
-        verify_candidate(self.root, "ISSUE-123", code["run_id"])
-        status, payload, stderr = self._cli(
-            [
-                "decide",
-                "ISSUE-123",
-                "CODE_CHANGE",
-                "--actor",
-                "engineer@example.com",
-                "--rationale",
-                "ship broken change",
-            ]
-        )
-        self.assertEqual(status, 2, payload)
-        self.assertIn("refused", stderr)
-        status, payload, stderr = self._cli(
-            [
-                "decide",
-                "ISSUE-123",
-                "CODE_CHANGE",
-                "--override",
-                "--actor",
-                "engineer@example.com",
-                "--rationale",
-                "accept with failed floor visible",
-            ]
-        )
-        self.assertEqual(status, 0, stderr)
-        from mosaic_harness.storage import CaseStore
-
-        pack = CaseStore(self.root / ".harness").load("ISSUE-123")
-        self.assertEqual(pack["admission"]["status"], "overridden")
-        self.assertTrue(any("floor failures" in item for item in pack["unresolved_questions"]))
+            )
 
 
 if __name__ == "__main__":

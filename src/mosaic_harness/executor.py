@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from mosaic_harness.isolation import classify_denial, wrap_command
-from mosaic_harness.util import atomic_write_json, utc_now
+from mosaic_harness.util import atomic_write_json, sha256_bytes, utc_now
 
 
-MANIFEST_VERSION = "1.0.0"
+MANIFEST_VERSION = "2.0.0"
 DEFAULT_BUDGET = {"max_seconds": 30, "max_output_bytes": 65536}
 
 
@@ -37,6 +37,8 @@ class LocalCommandAdapter:
         profile: str,
         budget: Mapping[str, int],
         env: Mapping[str, str],
+        output_dir: Path | None = None,
+        output_name: str = "command",
     ) -> dict[str, Any]:
         max_seconds = int(budget.get("max_seconds", DEFAULT_BUDGET["max_seconds"]))
         max_output = int(budget.get("max_output_bytes", DEFAULT_BUDGET["max_output_bytes"]))
@@ -68,12 +70,26 @@ class LocalCommandAdapter:
         stderr = stderr or ""
         exit_code = process.returncode if not timed_out else None
         denial = classify_denial(0 if timed_out else exit_code, stdout, stderr)
+        stdout_ref: str | None = None
+        stderr_ref: str | None = None
+        if output_dir is not None:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            stdout_path = output_dir / f"{output_name}.stdout.txt"
+            stderr_path = output_dir / f"{output_name}.stderr.txt"
+            stdout_path.write_text(stdout, encoding="utf-8")
+            stderr_path.write_text(stderr, encoding="utf-8")
+            stdout_ref = str(stdout_path)
+            stderr_ref = str(stderr_path)
         return {
             "command": list(command),
             "wrapped_command": [wrapped[0], "-p", "<isolation-profile>", "--", *list(command)],
             "exit_code": exit_code,
             "stdout": stdout[:max_output],
             "stderr": stderr[:max_output],
+            "stdout_sha256": sha256_bytes(stdout.encode("utf-8")),
+            "stderr_sha256": sha256_bytes(stderr.encode("utf-8")),
+            "stdout_ref": stdout_ref,
+            "stderr_ref": stderr_ref,
             "interrupted": timed_out,
             "timed_out": timed_out,
             "denial": denial,

@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0.0",
+  "contract_id": "WC-SPIKE-V03",
+  "case_id": "SPIKE-V03-SMOKE",
+  "objective": "Remove completed tickets from the active rail without changing the store contract.",
+  "constraints": [
+    {
+      "id": "C-TARGET",
+      "role": "target",
+      "force": "hard",
+      "statement": "Completed tickets must not appear in active().",
+      "evidence_condition": "target-completed-ticket changes from FAIL to PASS."
+    },
+    {
+      "id": "C-PRESERVATION",
+      "role": "preservation",
+      "force": "hard",
+      "statement": "Existing add, delete, and validation behavior must remain stable.",
+      "evidence_condition": "preserve-store-contract passes on zero-change and code."
+    },
+    {
+      "id": "C-BOUNDARY",
+      "role": "boundary",
+      "force": "hard",
+      "statement": "Only the Spike candidate is mutable.",
+      "evidence_condition": "The source Spike repository remains unchanged."
+    },
+    {
+      "id": "C-RESOURCE",
+      "role": "resource",
+      "force": "soft",
+      "statement": "Use the verification contract budget.",
+      "evidence_condition": "Actual execution time and output bytes are recorded."
+    }
+  ],
+  "non_goals": [
+    "Change the HTTP API",
+    "Add parallel workers",
+    "Modify Mosaic constitution or hidden evaluators"
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-ACTIVE",
+      "statement": "A completed ticket is absent from active().",
+      "verification_check_ids": ["target-completed-ticket"]
+    },
+    {
+      "id": "AC-STORE",
+      "statement": "The existing store contract remains compatible.",
+      "verification_check_ids": ["preserve-store-contract"]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-INVESTIGATE",
+      "kind": "investigate",
+      "description": "Establish that TicketStore.active causes the reported behavior.",
+      "depends_on": [],
+      "read_set": ["src/spike/store.py", "tests/test_store.py"],
+      "write_set": [],
+      "acceptance_criteria_ids": ["AC-ACTIVE"]
+    },
+    {
+      "id": "T-IMPLEMENT",
+      "kind": "implement",
+      "description": "Filter completed tickets from TicketStore.active.",
+      "depends_on": ["T-INVESTIGATE"],
+      "read_set": ["src/spike/store.py"],
+      "write_set": ["src/spike/store.py"],
+      "acceptance_criteria_ids": ["AC-ACTIVE", "AC-STORE"]
+    }
+  ],
+  "completion_policy": {
+    "success_outcomes": ["CODE_CHANGE", "NO_CHANGE"],
+    "stop_outcomes": [
+      "INSTRUMENT_FIRST",
+      "POLICY_CONFLICT",
+      "INSUFFICIENT_EVIDENCE",
+      "ISSUE_REJECTED"
+    ]
+  }
+}
